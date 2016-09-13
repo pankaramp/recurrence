@@ -54,13 +54,16 @@ library
   -- exposed-modules:     
   
   -- Modules included in this library but not exported.
-  -- other-modules:       
+  other-modules:       Functions
   
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:    
   
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4.8 && <4.9
+  build-depends:       base >= 4.8 && < 4.10,
+                       fgl >= 5.5.3 && < 5.6,
+                       fgl-visualize >= 0.1.0 && < 0.2,
+                       singletons >= 2.1 && < 2.3
   
   -- Directories containing source files.
   hs-source-dirs:      src
