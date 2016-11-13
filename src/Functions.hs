@@ -120,23 +120,13 @@ sigmoid x = 1 / (1 + exp (-x))
 sigm :: Floating a => DifferentiableFunction (S Z) a
 sigm = (toFunction sigmoid, (toFunction (\x -> (sigmoid x) * (1 - sigmoid x))) `Cons` Nil)
 
-type Node = Int
+type Context (m :: Nat) (n :: Nat) a = (List n (Fin m), )
 
-type Context (m :: Nat) (n :: Nat) a = (List n (Fin m), DifferentiableFunction n a)
-
-data NeuralNetwork (n :: Nat) (w :: Nat) (i :: Nat) (o :: Nat) a where
-  Empty :: NeuralNetwork Z Z Z Z a
-  Weight :: NatProxy w -> NeuralNetwork n w i o a -> NeuralNetwork (S n) (S w) i o a
-  Input :: NatProxy i -> NeuralNetwork n w i o a -> NeuralNetwork (S n) w (S i) o a
-  Output :: NatProxy o -> NeuralNetwork n w i o a -> NeuralNetwork (S n) w i (S o) a
-  Operator :: Context n k a -> NeuralNetwork n w i o a -> NeuralNetwork (S n) w i o a
-
-size :: NeuralNetwork n w i o a -> Fin (S n)
-size Empty = ZF
-size (Weight _ nn) = SF (size nn)
-size (Input _ nn) = SF (size nn)
-size (Output _ nn) = SF (size nn)
-size (Operator _ nn) = SF (size nn)
+data NeuralNetwork (n :: Nat) where
+  Weight :: SNat w -> Node (S Z)
+  Input :: SNat i -> Node (S Z)
+  Union :: NeuralNetwork n -> NeuralNetwork m -> NeuralNetwork (Plus n m)
+  Operator :: NeuralNetwork k -> DifferentiableFunction n a -> List n (Fin k) -> NeuralNetwork (S k)
 
 map :: (a -> b) -> List n a -> List n b
 map _ Nil = Nil

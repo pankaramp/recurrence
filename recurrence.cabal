@@ -54,7 +54,7 @@ library
   -- exposed-modules:     
   
   -- Modules included in this library but not exported.
-  other-modules:       Functions
+  other-modules:       Math NeuralNetwork Proofs
   
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:    
@@ -63,7 +63,8 @@ library
   build-depends:       base >= 4.8 && < 4.10,
                        fgl >= 5.5.3 && < 5.6,
                        fgl-visualize >= 0.1.0 && < 0.2,
-                       singletons >= 2.1 && < 2.3
+                       singletons >= 2.1 && < 2.3,
+                       template-haskell >= 2.10 && < 2.11
   
   -- Directories containing source files.
   hs-source-dirs:      src
