@@ -78,10 +78,10 @@ addNeuron sk sn nn vs o f =
   in
     (Operator nn' f (v `Cons` Nil), asFin (SS (SS (SS (sPlus sn (sPlus sn sk))))))
 
-a sio sk = $(minusplus 12 6 (ksize 4 2))
-b sio sk = $(weakenProof 12 6 (ksize 4 2))
 
-{-addLSTMNeuron1 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork k a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork (S (S (S (S (Plus (S i) (Plus (S i) k)))))) a, Fin (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))))
+--b sio sk e = $(weakenProof 12 6 (ksize 0 2)) $ gcastWith ($(minusplus 12 6 (ksize 0 2))) $ e
+
+addLSTMNeuron1 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork k a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork (S (S (S (S (Plus (S i) (Plus (S i) k)))))) a, Fin (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))))
 addLSTMNeuron1 sk si nn i o c u =
   let
     io = o `Cons` i
@@ -90,14 +90,11 @@ addLSTMNeuron1 sk si nn i o c u =
   in
     (
       nn',
-      gcastWith $(weakenProof 12 6 (ksize 4 2)) $
- --     gcastWith $(minusplus 12 6 (ksize 4 2)) $
-      weaken
-      $(ksize 16 8)
-      $(ksize 4 2)
-      $(iosize 12 6)
+      $(weakenProof 6 2 $ [e|
+      weaken $(ksize 16 8) $(ksize 4 2) $(iosize 12 6)
       v
-    )-}
+      |])
+    )
 
 addLSTMNeuron2 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork (S (S (S (S (Plus (S i) (Plus (S i) k)))))) a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))) a, Fin (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))))
 addLSTMNeuron2 sk si nn i o c u =
@@ -106,12 +103,11 @@ addLSTMNeuron2 sk si nn i o c u =
     sio = SS si
     sk' = (SS (SS (SS (SS (sPlus sio (sPlus sio sk))))))
     (io', u') =
-      gcastWith $(weakenProof 4 2 (ksize 0 0)) $
-      gcastWith $(minusplus 4 2 (ksize 0 0)) $
+      $(weakenProof 2 0 $ [e|
       (
         weakenList sk' sk (SS (SS (SS (SS (sPlus sio sio))))) io,
         weaken sk' sk (SS (SS (SS (SS (sPlus sio sio))))) u
-      )
+      )|])      
     (nn', v) = addNeuron sk' sio nn io' u' sigm
   in
     (
@@ -159,23 +155,11 @@ addLSTMNeuron3 sk si nn i o c u =
     sio = SS si
     sk' = (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))
     (io', u') =
-      gcastWith (associativity sio sio sk) $
-      gcastWith (associativity sio (sPlus sio sio) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio sio)) sk) $
-      gcastWith (commutativity (sPlus sio (sPlus sio (sPlus sio sio))) sk) $
-      gcastWith (successor_of_sum sk (sPlus sio (sPlus sio (sPlus sio sio)))) $
-      gcastWith (successor_of_sum sk (SS (sPlus sio (sPlus sio (sPlus sio sio))))) $
-      gcastWith (successor_of_sum sk (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))))))) $
-      gcastWith (minus_plus sk (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))))))))) $
+      $(weakenProof 4 0 [e|
       (
         weakenList sk' sk (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))))))) io,
         weaken sk' sk (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))))))) u
-      )
+      )|])
     (nn', v) = addNeuron sk' sio nn io' u' sigm      
   in
     (
