@@ -1,6 +1,6 @@
 {-# LANGUAGE MultiParamTypeClasses, TemplateHaskell, KindSignatures, DataKinds, ScopedTypeVariables, GADTs, TypeFamilies, FlexibleInstances, TypeOperators, UndecidableInstances, InstanceSigs, FlexibleContexts #-}
 
-module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.foldr, Math.conc, Math.tanh, sigm, asFin) where
+module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.foldr, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne) where
 
 import Data.Singletons
 import Data.Singletons.TH
@@ -135,6 +135,13 @@ prod n = (op (*) 1, Math.map (opExcept (*) 1) (range n))
 
 sum :: (Num a) => SNat n -> DifferentiableFunction n a
 sum n = (op (+) 0, Math.map (\_ _ -> 1) (range n))
+
+weakenOne :: SNat k -> Fin k -> Fin (S k)
+weakenOne (SS SZ) ZF = ZF
+weakenOne (SS n) (SF f) = SF (weakenOne n f)
+
+weakenListOne :: SNat k -> List n (Fin k) -> List n (Fin (S k))
+weakenListOne sk = Math.map (weakenOne sk)
 
 weaken :: forall n m k . ((Minus m n) ~ NatJust k) => SNat m -> SNat n -> SNat k -> Fin n -> Fin m
 weaken sm sn sk ZF =  gcastWith (apply Refl $ plus_minus sm sn sk) ZF

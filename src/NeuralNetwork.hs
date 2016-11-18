@@ -71,6 +71,9 @@ addInducedLocalField sk sn nn vs o =
 addProduct :: Num a => SNat k -> SNat n -> NeuralNetwork k a -> List n (Fin k) -> (NeuralNetwork (S k) a, Fin (S k))
 addProduct sk sn nn vs = (Operator nn (prod sn) vs, asFin sk)
 
+addSum :: Num a => SNat k -> SNat n -> NeuralNetwork k a -> List n (Fin k) -> (NeuralNetwork (S k) a, Fin (S k))
+addSum sk sn nn vs = (Operator nn (Math.sum sn) vs, asFin sk)
+
 addNeuron :: Num a => SNat k -> SNat n -> NeuralNetwork k a -> List n (Fin k) -> Fin k -> DifferentiableFunction (S Z) a -> (NeuralNetwork (S (S (S (S (Plus n (Plus n k)))))) a, Fin (S (S (S (S (Plus n (Plus n k)))))))
 addNeuron sk sn nn vs o f =
   let
@@ -79,9 +82,7 @@ addNeuron sk sn nn vs o f =
     (Operator nn' f (v `Cons` Nil), asFin (SS (SS (SS (sPlus sn (sPlus sn sk))))))
 
 
---b sio sk e = $(weakenProof 12 6 (ksize 0 2)) $ gcastWith ($(minusplus 12 6 (ksize 0 2))) $ e
-
-addLSTMNeuron1 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork k a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork (S (S (S (S (Plus (S i) (Plus (S i) k)))))) a, Fin (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))))
+addLSTMNeuron1 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork k a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork $(tksize 4 2) a, Fin $(tksize 16 8))
 addLSTMNeuron1 sk si nn i o c u =
   let
     io = o `Cons` i
@@ -90,208 +91,80 @@ addLSTMNeuron1 sk si nn i o c u =
   in
     (
       nn',
-      $(weakenProof 6 2 $ [e|
+      $(weakenProof 4 1 $ [e|
       weaken $(ksize 16 8) $(ksize 4 2) $(iosize 12 6)
       v
       |])
     )
 
-addLSTMNeuron2 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork (S (S (S (S (Plus (S i) (Plus (S i) k)))))) a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))) a, Fin (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))))
+addLSTMNeuron2 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork $(tksize 4 2) a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork $(tksize 8 4) a, Fin $(tksize 16 8))
 addLSTMNeuron2 sk si nn i o c u =
   let
     io = o `Cons` i
     sio = SS si
     sk' = (SS (SS (SS (SS (sPlus sio (sPlus sio sk))))))
     (io', u') =
-      $(weakenProof 2 0 $ [e|
+      $(weakenProof 1 0 $ [e|
       (
-        weakenList sk' sk (SS (SS (SS (SS (sPlus sio sio))))) io,
-        weaken sk' sk (SS (SS (SS (SS (sPlus sio sio))))) u
+        weakenList sk' sk $(iosize 4 2) io,
+        weaken sk' sk $(iosize 4 2) u
       )|])      
     (nn', v) = addNeuron sk' sio nn io' u' sigm
   in
     (
-      gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio sk)))))) $
-      gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio sk))))) $
-      gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio sk)))) $
-      gcastWith (successor_of_sum sio (sPlus sio (sPlus sio sk))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio (sPlus sio sk)))))) $
-      gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio (sPlus sio sk))))) $
-      gcastWith (successor_of_sum sio (sPlus sio (sPlus sio (sPlus sio sk)))) $
-      nn',
-      gcastWith (associativity sio sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))) $
-      gcastWith (associativity sio (sPlus sio sio) (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio sio)) (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))) $
-      gcastWith (commutativity (sPlus sio (sPlus sio (sPlus sio sio))) (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))) $
-      gcastWith (successor_of_sum (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) (sPlus sio (sPlus sio (sPlus sio sio)))) $
-      gcastWith (successor_of_sum (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) (SS (sPlus sio (sPlus sio (sPlus sio sio))))) $
-      gcastWith (successor_of_sum (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))) $
-      gcastWith (successor_of_sum (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))) $
-      gcastWith (successor_of_sum (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))))) $
-      gcastWith (successor_of_sum (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))))) $
-      gcastWith (successor_of_sum (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))))))) $
-      gcastWith (successor_of_sum (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))))))) $
-      gcastWith (minus_plus (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))) (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio sk)))))) $
-      gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio sk))))) $
-      gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio sk)))) $
-      gcastWith (successor_of_sum sio (sPlus sio (sPlus sio sk))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio (sPlus sio sk)))))) $
-      gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio (sPlus sio sk))))) $
-      gcastWith (successor_of_sum sio (sPlus sio (sPlus sio (sPlus sio sk)))) $
-      weaken
-      (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))))))))))))
-      (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))
-      (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio)))))))))))
-      v
+      $(normalize 4 1 [e|nn'|]),
+      $(weakenProof 4 2 $ normalize 4 1 [e| weaken $(ksize 16 8) $(ksize 8 4) $(iosize 8 4) v|])
     )
 
-addLSTMNeuron3 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))) a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))) a, Fin (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))))
+addLSTMNeuron3 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork $(tksize 8 4) a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork $(tksize 12 6) a, Fin $(tksize 16 8))
 addLSTMNeuron3 sk si nn i o c u =
   let
     io = o `Cons` i
     sio = SS si
-    sk' = (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))
+    sk' = $(ksize 8 4)
     (io', u') =
-      $(weakenProof 4 0 [e|
+      $(weakenProof 2 0 [e|
       (
-        weakenList sk' sk (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))))))) io,
-        weaken sk' sk (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio sio))))))))))) u
+        weakenList sk' sk $(iosize 8 4) io,
+        weaken sk' sk $(iosize 8 4) u
       )|])
     (nn', v) = addNeuron sk' sio nn io' u' sigm      
   in
     (
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-      gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))) $
-      gcastWith (successor_of_sum sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) $
-      gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-      gcastWith (successor_of_sum sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))) $
-      nn',
-      gcastWith (associativity sio sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-      gcastWith (commutativity (sPlus sio sio) (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-      gcastWith (successor_of_sum (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))) (sPlus sio sio)) $
-      gcastWith (successor_of_sum (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))) (SS (sPlus sio sio))) $
-      gcastWith (successor_of_sum (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))) (SS (SS (sPlus sio sio)))) $
-      gcastWith (successor_of_sum (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))) (SS (SS (SS (sPlus sio sio))))) $
-      gcastWith (minus_plus (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))))))))) (SS (SS (SS (SS (sPlus sio sio)))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-      gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))) $
-      gcastWith (successor_of_sum sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))) $
-      gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))) $
-      gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) $
-      gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-      gcastWith (successor_of_sum sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))) $
-      weaken
-      (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))))))))))))
-      (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))))))
-      (SS (SS (SS (SS (sPlus sio sio)))))
-      v
+      $(normalize 4 2 [e|nn'|]),
+      $(weakenProof 4 3 $ normalize 4 2 $ [e|weaken $(ksize 16 8) $(ksize 12 6) $(iosize 4 2) v|])
     )
 
-addLSTMNeuron4 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))) a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))) a, Fin (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))))
+addLSTMNeuron4 :: (Floating a) => SNat k -> SNat i -> NeuralNetwork $(tksize 12 6) a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork $(tksize 16 8) a, Fin $(tksize 16 8))
 addLSTMNeuron4 sk si nn i o c u =
   let
     io = o `Cons` i
     sio = SS si
-    sk' = (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))))))
+    sk' = $(ksize 12 6)
     (io', u') =
-      gcastWith (associativity sio sio sk) $
-      gcastWith (associativity sio (sPlus sio sio) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio sio)) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio sio))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))) sk) $
-      gcastWith (commutativity (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))) sk) $
-      gcastWith (successor_of_sum sk (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))))) $
-      gcastWith (successor_of_sum sk (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))))))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))))))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))))))))))))))) $
-      gcastWith (successor_of_sum sk (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))))))))))))))) $
-      gcastWith (minus_plus sk (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))))))))))))))))) $
+      $(weakenProof 3 0 $ [e|
       (
-        weakenList sk' sk (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))))))))))))))) io,
-        weaken sk' sk (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))))))))))))))) u
-      )
+        weakenList sk' sk $(iosize 12 6) io,
+        weaken sk' sk $(iosize 12 6) u
+      )|])
     (nn', v) = addNeuron sk' sio nn io' u' Math.tanh
   in
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))) $
-    gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) $
-    gcastWith (successor_of_sum sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))) $
-    gcastWith (successor_of_sum sio (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))))) $
-    gcastWith (successor_of_sum sio (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))) $
-    gcastWith (successor_of_sum sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk)))))))) $
-    (nn', v)
+    $(normalize 4 3 $ [e|(nn', v)|])
 
-{-addLSTMNeuron :: (Floating a) => SNat k -> SNat i -> NeuralNetwork k a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> NeuralNetwork (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (S (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) (Plus (S i) k)))))))))))))))))))))))) a
+addLSTMNeuron :: (Floating a) => SNat k -> SNat i -> NeuralNetwork k a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork $(tksize 21 8) a, Fin $(tksize 21 8), Fin $(tksize 21 8))
 addLSTMNeuron sk si nn i o c u =
   let
     sio = SS si
-    sk' = (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sk))))))))))))))))))))))))
-    cc =
-      gcastWith (associativity sio sio sk) $
-      gcastWith (associativity sio (sPlus sio sio) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio sio)) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio sio))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus (sio sio)))))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus (sio (sPlus (sio sio)))))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus (sio (sPlus (sio (sPlus (sio sio)))))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio sio)))))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio sio)))))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio sio)))))) sk) $
-      gcastWith (associativity sio (sPlus sio (sPlus sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus (sio (sPlus sio (sPlus sio (sPlus (sio sio)))))) sk) $      
-      gcastWith (commutativity (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio))))) sk) $
-      weaken sk' sk (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (SS (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio (sPlus sio sio)))))))))))))))))))))))) c
+    sk' = $(ksize 16 8)
+    cc = $(weakenProof 4 0 [e|weaken sk' sk $(iosize 16 8) c|])
     (nn', f) = addLSTMNeuron1 sk si nn i o c u
     (nn'', i') = addLSTMNeuron2 sk si nn' i o c u
-    (nn''', o') = addLSTMNeuron3 sk si nn'' i o c u
-    (nn'''', c') = addLSTMNeuron4 sk si nn''' i o c u
+    (nn''', t') = addLSTMNeuron3 sk si nn'' i o c u
+    (nn'''', t) = addLSTMNeuron4 sk si nn''' i o c u
     (nn''''', t1) = addProduct sk' (SS (SS SZ)) nn'''' (f `Cons` (cc `Cons` Nil))
+    (nn'''''', t2) = addProduct (SS sk') (SS (SS SZ)) nn''''' (weakenListOne sk' $ i' `Cons` (t `Cons` Nil))
+    (nn''''''', c') = addSum (SS (SS sk')) (SS (SS SZ)) nn'''''' ((weakenOne (SS sk') t1) `Cons` (t2 `Cons` Nil))
+    (nn'''''''', t3) = (Operator nn''''''' Math.tanh (c' `Cons` Nil), asFin (SS (SS (SS sk'))))
+    (nnf, o') = addProduct (SS (SS (SS (SS sk')))) (SS (SS SZ)) nn'''''''' (t3 `Cons` ((weakenOne (SS (SS (SS sk'))) $ weakenOne (SS (SS sk')) $ weakenOne (SS sk') $ weakenOne sk' t') `Cons` Nil))
   in
-    nn''''-}
+    (nnf, weakenOne (SS (SS (SS (SS sk')))) $ weakenOne (SS (SS (SS sk'))) c', o')
