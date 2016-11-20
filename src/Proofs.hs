@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module Proofs(weakenProof, minusplus, ksize, iosize, succsums, commut, assocs, assoc, normalize, tksize, tiosize) where
+module Proofs(weakenProof, minusplus, ksize, iosize, wsize, succsums, commut, assocs, assoc, normalize, tksize, tiosize, twsize, normalizeW) where
 
 import Data.List
 import Control.Monad
@@ -20,9 +20,11 @@ tsN n e = appTn n (conT (mkName "S")) e
 
 iosize n m = ssN n (spioN (m-1) (varE (mkName "sio")))
 ksize n m = ssN n (spioN m (varE (mkName "sk")))
+wsize n m = ssN n (spioN m (varE (mkName "sw")))
 
 tiosize n m = tsN n (tpioN (m-1) (appT (conT (mkName "S")) (varT (mkName "i"))))
 tksize n m = tsN n (tpioN m (varT (mkName "k")))
+twsize n m = tsN n (tpioN m (varT (mkName "w")))
 
 cast e t = appE (appE (varE (mkName "gcastWith")) e) t
 
@@ -42,4 +44,6 @@ minusplus n m e = cast $ appE (appE (varE (mkName "minus_plus")) e) (iosize n m)
 
 weakenProof n k t = assocs (2*n-2*k) (ksize 0 (2*k)) $ commut (2*n-2*k) (ksize 0 (2*k)) $ succsums (4*n-4*k) (2*n-2*k) (ksize 0 (2*k)) $ minusplus (4*n-4*k) (2*n-2*k) (ksize (4*k) (2*k)) $ t
 
-normalize n k t = foldl' (\a i -> foldl' (\b j -> succsum' (ksize j i) b) a [0..(4*k-1)]) t [2*k..2*n-1] 
+normalize n k t = foldl' (\a i -> foldl' (\b j -> succsum' (ksize j i) b) a [0..(4*k-1)]) t [2*k..2*n-1]
+
+normalizeW n w t = foldl' (\a i -> foldl' (\b j -> succsum' (wsize j i) b) a [0..(w-1)]) t [w..n-1] 

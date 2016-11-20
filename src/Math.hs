@@ -1,6 +1,6 @@
 {-# LANGUAGE MultiParamTypeClasses, TemplateHaskell, KindSignatures, DataKinds, ScopedTypeVariables, GADTs, TypeFamilies, FlexibleInstances, TypeOperators, UndecidableInstances, InstanceSigs, FlexibleContexts #-}
 
-module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.foldr, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne) where
+module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.foldr, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne, toList, fToInt, weaken1, weaken2, weaken3, weaken4, weaken5, weaken6, toInt) where
 
 import Data.Singletons
 import Data.Singletons.TH
@@ -26,6 +26,13 @@ singletons [d|
               times Z _ = Z
               times (S n) k = plus (times n k) k
              |]
+
+toInt :: SNat n -> Int
+toInt SZ = 0
+toInt (SS sn) = 1 + (toInt sn)
+
+instance Show (SNat n) where
+  show = show . toInt
 
 minus_pred :: SNat n -> NatJust (S Z) :~: Minus (S n) n
 minus_pred SZ = Refl
@@ -53,10 +60,8 @@ associativity SZ m k = Refl
 associativity (SS n) m k = gcastWith (associativity n m k) Refl
 
 commutativity' :: SNat n -> SNat m -> Plus (S n) m :~: Plus n (S m)
-commutativity' n m = gcastWith (commutativity' n m) Refl
-
-commutativity'' :: SNat n -> SNat m -> Plus (S n) m :~: Plus (S m) n
-commutativity'' n m = gcastWith (commutativity n m) Refl
+commutativity' SZ m = Refl
+commutativity' (SS n) m = gcastWith (commutativity' n m) Refl
 
 successor_of_sum :: SNat n -> SNat m -> S (Plus n m) :~: Plus n (S m)
 successor_of_sum n m =
@@ -69,8 +74,8 @@ commutativity SZ SZ = Refl
 commutativity (SS n) SZ = gcastWith (commutativity n SZ) Refl
 commutativity SZ (SS n) = gcastWith (commutativity SZ n) Refl
 commutativity (SS n) (SS m) =
-  gcastWith (commutativity'' (SS n) m) $
-  gcastWith (commutativity' (SS n) m) $
+  gcastWith (commutativity' n m) $
+  gcastWith (commutativity (SS n) m) $
   Refl
 
 zero_right_identity :: SNat n -> Plus n Z :~: n
@@ -79,6 +84,13 @@ zero_right_identity n = gcastWith (commutativity n SZ) Refl
 data Fin (n :: Nat) where
   ZF :: Fin (S n)
   SF :: Fin n -> Fin (S n)
+
+instance Show (Fin n) where
+  show = show . fToInt
+
+fToInt :: Fin n -> Int
+fToInt ZF = 0
+fToInt (SF fn) = 1 + (fToInt fn)
 
 fPlus :: SNat n -> SNat m -> Fin n -> Fin m -> Fin (Plus n m)
 fPlus sn sm ZF m = gcastWith (minus_plus' sn sm) $ weaken (sPlus sn sm) sm sn m
@@ -128,16 +140,16 @@ replace :: a -> Fin n -> List n a -> List n a
 replace r ZF (_ `Cons` t) = r `Cons` t
 replace r (SF n) (h `Cons` t) = r `Cons` (replace r n t)
 
-type DifferentiableFunction n a = (Function n a, List n (Function n a))
+type DifferentiableFunction n a = (Function n a, List n (Function n a), String)
 
 prod :: (Num a) => SNat n -> DifferentiableFunction n a
-prod n = (op (*) 1, Math.map (opExcept (*) 1) (range n))
+prod n = (op (*) 1, Math.map (opExcept (*) 1) (range n), "*")
 
 sum :: (Num a) => SNat n -> DifferentiableFunction n a
-sum n = (op (+) 0, Math.map (\_ _ -> 1) (range n))
+sum n = (op (+) 0, Math.map (\_ _ -> 1) (range n), "+")
 
 weakenOne :: SNat k -> Fin k -> Fin (S k)
-weakenOne (SS SZ) ZF = ZF
+weakenOne (SS _) ZF = ZF
 weakenOne (SS n) (SF f) = SF (weakenOne n f)
 
 weakenListOne :: SNat k -> List n (Fin k) -> List n (Fin (S k))
@@ -154,14 +166,32 @@ toFunction :: (a -> a) -> Function (S Z) a
 toFunction f (x `Cons` Nil) = f x
 
 tanh :: Floating a => DifferentiableFunction (S Z) a
-tanh = (toFunction Prelude.tanh, (toFunction (\x -> 1 - (Prelude.tanh x) ^ 2)) `Cons` Nil)
+tanh = (toFunction Prelude.tanh, (toFunction (\x -> 1 - (Prelude.tanh x) ^ 2)) `Cons` Nil, "tanh")
 
 sigmoid :: Floating a => a -> a
 sigmoid x = 1 / (1 + exp (-x))
 
 sigm :: Floating a => DifferentiableFunction (S Z) a
-sigm = (toFunction sigmoid, (toFunction (\x -> (sigmoid x) * (1 - sigmoid x))) `Cons` Nil)
+sigm = (toFunction sigmoid, (toFunction (\x -> (sigmoid x) * (1 - sigmoid x))) `Cons` Nil, "sigm")
 
 asFin :: SNat k -> Fin (S k)
 asFin SZ = ZF
 asFin (SS n) = SF (asFin n)
+
+weaken1 :: (SingI k) => Fin k -> Fin (S k)
+weaken1 = weakenOne sing
+
+weaken2 :: (SingI k) => Fin k -> Fin (S (S k))
+weaken2 = weaken1 . weaken1
+
+weaken3 :: (SingI k) => Fin k -> Fin (S (S (S k)))
+weaken3 = weaken1 . weaken2
+
+weaken4 :: (SingI k) => Fin k -> Fin (S (S (S (S k))))
+weaken4 = weaken1 . weaken3
+
+weaken5 :: (SingI k) => Fin k -> Fin (S (S (S (S (S k)))))
+weaken5 = weaken1 . weaken4
+
+weaken6 :: (SingI k) => Fin k -> Fin (S (S (S (S (S (S k))))))
+weaken6 = weaken1 . weaken5
