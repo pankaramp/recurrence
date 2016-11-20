@@ -1,6 +1,6 @@
 {-# LANGUAGE MultiParamTypeClasses, TemplateHaskell, KindSignatures, DataKinds, ScopedTypeVariables, GADTs, TypeFamilies, FlexibleInstances, TypeOperators, UndecidableInstances, InstanceSigs, FlexibleContexts #-}
 
-module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.foldr, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne, toList, fToInt, weaken1, weaken2, weaken3, weaken4, weaken5, weaken6, toInt) where
+module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.foldr, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne, toList, fToInt, weaken1, weaken2, weaken3, weaken4, weaken5, weaken6, toInt, split, Math.map, Math.last, Math.length) where
 
 import Data.Singletons
 import Data.Singletons.TH
@@ -108,6 +108,10 @@ map :: (a -> b) -> List n a -> List n b
 map _ Nil = Nil
 map f (h `Cons` t) = (f h) `Cons` (Math.map f t)
 
+length :: List n a -> SNat n
+length Nil = SZ
+length (_ `Cons` xs) = SS (Math.length xs)
+
 foldr :: (a -> b -> b) -> b -> List n a -> b
 foldr _ z Nil = z
 foldr k z (h `Cons` t) = h `k` (Math.foldr k z t)
@@ -115,6 +119,21 @@ foldr k z (h `Cons` t) = h `k` (Math.foldr k z t)
 conc :: List n a -> List m a -> List (Plus n m) a
 conc Nil b = b
 conc (h `Cons` t) b = h `Cons` (conc t b)
+
+reverse'' :: SNat n -> SNat m -> List n a -> List m a -> List (Plus n m) a
+reverse'' SZ _ Nil acc = acc
+reverse'' (SS n) m (x `Cons` xs) acc = gcastWith (successor_of_sum n m) $ reverse'' n (SS m) xs (x `Cons` acc)
+
+reverse' :: List n a -> List m a -> List (Plus n m) a
+reverse' a b = reverse'' (Math.length a) (Math.length b) a b
+
+reverse :: List n a -> List n a
+reverse a = gcastWith (commutativity (Math.length a) SZ) $ reverse' a Nil
+
+head :: List (S Z) a -> a
+head (x `Cons` _) = x
+
+last = Math.last . Math.reverse
 
 toList :: (List n a) -> [a]
 toList Nil = []
@@ -195,3 +214,11 @@ weaken5 = weaken1 . weaken4
 
 weaken6 :: (SingI k) => Fin k -> Fin (S (S (S (S (S (S k))))))
 weaken6 = weaken1 . weaken5
+
+split :: SNat n -> SNat m -> List (Plus n m) a -> (List n a, List m a)
+split SZ _ l = (Nil, l)
+split (SS sn) sm (x `Cons` xs) =
+  let
+    (a, b) = split sn sm xs
+  in
+    (x `Cons` a, b)

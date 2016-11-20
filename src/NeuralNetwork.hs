@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds, KindSignatures, GADTs, TemplateHaskell #-}
 
-module NeuralNetwork(NeuralNetwork(..), toFGL, lstmNeuron, NeuralNetwork.nodes) where
+module NeuralNetwork(NeuralNetwork(..), toFGL, lstmNeuron, NeuralNetwork.params) where
 
 import Proofs
 import Data.Singletons
@@ -8,6 +8,7 @@ import Data.Singletons.TH
 import Data.Singletons.Prelude
 import Data.Promotion.Prelude
 import Math
+import Data.Maybe
 import Data.Type.Equality
 import Data.Graph.Inductive
 
@@ -16,35 +17,48 @@ data NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o ::
   PreviousState :: NeuralNetwork (S Z) Z Z (S Z) Z Z Z Z a
   State :: NeuralNetwork (S Z) Z (S Z) Z Z Z Z Z a
   Weight :: NeuralNetwork (S Z) (S Z) Z Z Z Z Z Z a
-  Input :: SNat i -> NeuralNetwork (S Z) Z Z Z (S Z) Z Z Z a
-  PreviousOutput :: SNat i -> NeuralNetwork (S Z) Z Z Z Z Z (S Z) Z a
-  Output :: SNat i -> NeuralNetwork (S Z) Z Z Z Z (S Z) Z Z a
+  Input :: NeuralNetwork (S Z) Z Z Z (S Z) Z Z Z a
+  PreviousOutput :: NeuralNetwork (S Z) Z Z Z Z Z (S Z) Z a
+  Output :: NeuralNetwork (S Z) Z Z Z Z (S Z) Z Z a
   Union :: NeuralNetwork n w1 s1 ps1 i1 o1 po1 u1 a -> NeuralNetwork m w2 s2 ps2 i2 o2 po2 u2 a -> NeuralNetwork (Plus n m) (Plus w1 w2) (Plus s1 s2) (Plus ps1 ps2) (Plus i1 i2) (Plus o1 o2) (Plus po1 po2) (Plus u1 u2) a
   Operator :: NeuralNetwork k w s ps i o po u a -> DifferentiableFunction n a -> List n (Fin k) -> NeuralNetwork (S k) w s ps i o po u a
+
+params :: NeuralNetwork k w s ps i o po u a -> (SNat k, SNat w, SNat s, SNat ps, SNat i, SNat o, SNat po, SNat u)
+params Unity = (SS SZ, SZ, SZ, SZ, SZ, SZ, SZ, SS SZ)
+params Weight = (SS SZ, SS SZ, SZ, SZ, SZ, SZ, SZ, SZ)
+params State = (SS SZ, SZ, SS SZ, SZ, SZ, SZ, SZ, SZ)
+params Input = (SS SZ, SZ, SZ, SZ, SS SZ, SZ, SZ, SZ)
+params PreviousOutput = (SS SZ, SZ, SZ, SZ, SZ, SZ, SS SZ, SZ)
+params Output = (SS SZ, SZ, SZ, SZ, SZ, SS SZ, SZ, SZ)
+params (Union nn1 nn2) =
+  let
+    (k1, w1, s1, ps1, i1, o1, po1, u1) = params nn1
+    (k2, w2, s2, ps2, i2, o2, po2, u2) = params nn2
+  in
+    (sPlus k1 k2, sPlus w1 w2, sPlus s1 s2, sPlus ps1 ps2, sPlus i1 i2, sPlus o1 o2, sPlus po1 po2, sPlus u1 u2)
+params (Operator nn _ _) =
+  let
+    (k, w, s, ps, i, o, po, u) = params nn
+  in
+    (SS k, w, s, ps, i, o, po, u)
 
 toFGL' :: DynGraph gr => gr String () -> NeuralNetwork n w s ps i o po u a -> gr String ()
 toFGL' g Weight = ([], noNodes g, "W", []) & g
 toFGL' g Unity = ([], noNodes g, "1", []) & g
 toFGL' g State = ([], noNodes g, "S", []) & g
-toFGL' g (Input l) = ([], noNodes g, "I" ++ show l, []) & g
-toFGL' g (Output l) = ([], noNodes g, "O" ++ show l, []) & g
+toFGL' g Input = ([], noNodes g, "I", []) & g
+toFGL' g Output = ([], noNodes g, "O", []) & g
 toFGL' g (Union nn1 nn2) = toFGL' (toFGL' g nn1) nn2
 toFGL' g (Operator nn f l) =
   let
     (_, _, fl) = f
-    l' = map (\v -> ((), fToInt v)) $ toList l
+    l' = Prelude.map (\v -> ((), fToInt v)) $ toList l
     g' = toFGL' g nn
   in
     (l', noNodes g', fl, []) & g'
 
 toFGL :: DynGraph gr => NeuralNetwork n w s ps i o po u a -> gr String ()
 toFGL = toFGL' empty
-
-size :: SNat k -> NeuralNetwork k w s ps i o po u a -> SNat k
-size s _ = s
-
-nodes :: (SingI k) => NeuralNetwork k w s ps i o po u a -> Int
-nodes nn = toInt $ NeuralNetwork.size sing nn
 
 addWeight :: NeuralNetwork n w s ps i o po u a -> NeuralNetwork (S n) (S w) s ps i o po u a
 addWeight nn = Union Weight nn
@@ -111,7 +125,6 @@ addNeuron sk sw sn nn vs o f =
     (nn', v) = addInducedLocalField sk sw sn nn vs o
   in
     (Operator nn' f (v `Cons` Nil), asFin (SS (SS (SS (sPlus sn (sPlus sn sk))))))
-
 
 addLSTMNeuron1 :: (Floating a) => SNat k -> SNat w -> SNat i -> NeuralNetwork k w s ps ii o po u a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork $(tksize 4 2) $(twsize 1 1) s ps ii o po u a, Fin $(tksize 16 8))
 addLSTMNeuron1 sk sw si nn i o c u =
@@ -202,3 +215,30 @@ addLSTMNeuron sk sw si nn i o c u =
 
 lstmNeuron :: (Floating a, SingI k, SingI w, SingI i) => NeuralNetwork k w s ps ii o po u a -> List i (Fin k) -> Fin k -> Fin k -> Fin k -> (NeuralNetwork $(tksize 21 8) $(twsize 4 4) s ps ii o po u a, Fin $(tksize 21 8), Fin $(tksize 21 8))
 lstmNeuron = addLSTMNeuron sing sing sing
+
+eval' :: NeuralNetwork n w s ps i o po u a -> List w a -> List ps a -> List po a -> List i a -> List n (Maybe a) -> List n (Maybe a)
+eval' _ _ _ _ _ l | isJust $ Math.last l = l
+eval' Weight (v `Cons` Nil) Nil Nil Nil (Nothing `Cons` Nil) = (Just v `Cons` Nil)
+eval' PreviousState Nil (v `Cons` Nil) Nil Nil (Nothing `Cons` Nil) = (Just v `Cons` Nil)
+eval' PreviousOutput Nil Nil (v `Cons` Nil) Nil (Nothing `Cons` Nil) = (Just v `Cons` Nil)
+eval' Input Nil Nil Nil (v `Cons` Nil) (Nothing `Cons` Nil) = (Just v `Cons` Nil)
+eval' (Union nn1 nn2) ws pss pos is ns =
+  let
+    (k1, w1, s1, ps1, i1, o1, po1, u1) = params nn1
+    (k2, w2, s2, ps2, i2, o2, po2, u2) = params nn2
+    (wa, wb) = split w1 w2 ws
+    (psa, psb) = split ps1 ps2 pss
+    (poa, pob) = split po1 po2 pos
+    (ia, ib) = split i1 i2 is
+    (na, nb) = split k1 k2 ns
+    r1 = eval' nn1 wa psa poa ia na
+    r2 = eval' nn2 wb psb pob ib nb
+  in
+    Math.conc r1 r2
+eval' (Operator nn (f, _, _) xs) ws pss pos is (n `Cons` ns) =
+  let
+    r = eval' nn ws pss pos is ns
+    rr = fromJust $ Math.last r
+    rrr = Just (f rr) `Cons` Nil
+  in
+    gcastWith (commutativity (Math.length r) (SS SZ)) $ Math.conc r rrr
