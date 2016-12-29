@@ -1,6 +1,6 @@
-{-# LANGUAGE MultiParamTypeClasses, TemplateHaskell, KindSignatures, DataKinds, ScopedTypeVariables, GADTs, TypeFamilies, FlexibleInstances, TypeOperators, UndecidableInstances, InstanceSigs, FlexibleContexts #-}
+{-# LANGUAGE MultiParamTypeClasses, TemplateHaskell, KindSignatures, DataKinds, ScopedTypeVariables, GADTs, TypeFamilies, FlexibleInstances, TypeOperators, UndecidableInstances, InstanceSigs, FlexibleContexts, Rank2Types #-}
 
-module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.foldr, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne, toList, fToInt, weaken1, weaken2, weaken3, weaken4, weaken5, weaken6, toInt, split, Math.map, Math.last, Math.length) where
+module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne, toList, fToInt, toInt, split, Math.map, Math.last, Math.length, range, element, Math.tail, Math.head, Math.reverse, replace, toFin) where
 
 import Data.Singletons
 import Data.Singletons.TH
@@ -88,6 +88,10 @@ data Fin (n :: Nat) where
 instance Show (Fin n) where
   show = show . fToInt
 
+toFin :: SNat n -> Fin (S n)
+toFin SZ = ZF
+toFin (SS x) = SF (toFin x)
+
 fToInt :: Fin n -> Int
 fToInt ZF = 0
 fToInt (SF fn) = 1 + (fToInt fn)
@@ -104,6 +108,18 @@ data List (n :: Nat) a  where
   Nil :: List Z a
   Cons :: a -> List n a -> List (S n) a
 
+instance Functor (List n) where
+  fmap _ Nil = Nil
+  fmap f (h `Cons` t) = (f h) `Cons` (fmap f t)
+
+instance Foldable (List n) where
+  foldr _ z Nil = z
+  foldr k z (h `Cons` t) = h `k` (foldr k z t)
+
+instance Traversable (List n) where
+  sequenceA Nil = pure Nil
+  sequenceA (h `Cons` t) = Cons <$> h <*> sequenceA t
+
 map :: (a -> b) -> List n a -> List n b
 map _ Nil = Nil
 map f (h `Cons` t) = (f h) `Cons` (Math.map f t)
@@ -111,10 +127,6 @@ map f (h `Cons` t) = (f h) `Cons` (Math.map f t)
 length :: List n a -> SNat n
 length Nil = SZ
 length (_ `Cons` xs) = SS (Math.length xs)
-
-foldr :: (a -> b -> b) -> b -> List n a -> b
-foldr _ z Nil = z
-foldr k z (h `Cons` t) = h `k` (Math.foldr k z t)
 
 conc :: List n a -> List m a -> List (Plus n m) a
 conc Nil b = b
@@ -130,10 +142,17 @@ reverse' a b = reverse'' (Math.length a) (Math.length b) a b
 reverse :: List n a -> List n a
 reverse a = gcastWith (commutativity (Math.length a) SZ) $ reverse' a Nil
 
-head :: List (S Z) a -> a
+head :: List (S n) a -> a
 head (x `Cons` _) = x
 
-last = Math.last . Math.reverse
+tail :: List (S n) a -> List n a
+tail (_ `Cons` xs) = xs
+
+element :: Fin n -> List n a -> a
+element ZF (x `Cons` _) = x
+element (SF f) (_ `Cons` xs) = element f xs
+
+last = Math.head . Math.reverse
 
 toList :: (List n a) -> [a]
 toList Nil = []
@@ -141,11 +160,11 @@ toList (h `Cons` t) = h:(toList t)
 
 type Function n a = List n a -> a
 
-op :: Num a => (a -> a -> a) -> a -> Function n a
-op o i = Math.foldr o i
+op :: (a -> a -> a) -> a -> Function n a
+op o i = foldr o i
 
-opExcept :: (Num a) => (a -> a -> a) -> a -> Fin n -> Function n a
-opExcept o i n = Math.foldr o i . replace i n
+opExcept :: (a -> a -> a) -> a -> Fin n -> Function n a
+opExcept o i n = foldr o i . replace i n
 
 select :: Fin n -> List n a -> a
 select ZF (h `Cons` _) = h
@@ -184,36 +203,18 @@ weakenList sm sn sk = Math.map (weaken sm sn sk)
 toFunction :: (a -> a) -> Function (S Z) a
 toFunction f (x `Cons` Nil) = f x
 
-tanh :: Floating a => DifferentiableFunction (S Z) a
+tanh :: (Floating a) => DifferentiableFunction (S Z) a
 tanh = (toFunction Prelude.tanh, (toFunction (\x -> 1 - (Prelude.tanh x) ^ 2)) `Cons` Nil, "tanh")
 
-sigmoid :: Floating a => a -> a
+sigmoid :: (Floating a) => a -> a
 sigmoid x = 1 / (1 + exp (-x))
 
-sigm :: Floating a => DifferentiableFunction (S Z) a
+sigm :: (Floating a) => DifferentiableFunction (S Z) a
 sigm = (toFunction sigmoid, (toFunction (\x -> (sigmoid x) * (1 - sigmoid x))) `Cons` Nil, "sigm")
 
 asFin :: SNat k -> Fin (S k)
 asFin SZ = ZF
 asFin (SS n) = SF (asFin n)
-
-weaken1 :: (SingI k) => Fin k -> Fin (S k)
-weaken1 = weakenOne sing
-
-weaken2 :: (SingI k) => Fin k -> Fin (S (S k))
-weaken2 = weaken1 . weaken1
-
-weaken3 :: (SingI k) => Fin k -> Fin (S (S (S k)))
-weaken3 = weaken1 . weaken2
-
-weaken4 :: (SingI k) => Fin k -> Fin (S (S (S (S k))))
-weaken4 = weaken1 . weaken3
-
-weaken5 :: (SingI k) => Fin k -> Fin (S (S (S (S (S k)))))
-weaken5 = weaken1 . weaken4
-
-weaken6 :: (SingI k) => Fin k -> Fin (S (S (S (S (S (S k))))))
-weaken6 = weaken1 . weaken5
 
 split :: SNat n -> SNat m -> List (Plus n m) a -> (List n a, List m a)
 split SZ _ l = (Nil, l)
