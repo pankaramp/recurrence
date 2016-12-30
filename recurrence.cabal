@@ -52,9 +52,10 @@ executable recurrence
   -- .hs or .lhs file containing the Main module.
   main-is:             Main.hs
 
---  ghc-options:         "-with-rtsopts=-p -hc -xc"
---                       -auto-all
---                       -caf-all
+  ghc-options:         "-with-rtsopts=-p -hc -xc"
+                       -auto-all
+                       -caf-all
+                       -O2
   
   -- Modules included in this executable, other than Main.
   other-modules:       Math NeuralNetwork Proofs

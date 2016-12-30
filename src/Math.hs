@@ -108,6 +108,9 @@ data List (n :: Nat) a  where
   Nil :: List Z a
   Cons :: a -> List n a -> List (S n) a
 
+instance (Show a) => Show (List n a) where
+  show = show . toList
+
 instance Functor (List n) where
   fmap _ Nil = Nil
   fmap f (h `Cons` t) = (f h) `Cons` (fmap f t)

@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds, KindSignatures, GADTs, TemplateHaskell, ScopedTypeVariables, FlexibleContexts, Rank2Types #-}
 
-module NeuralNetwork(NeuralNetwork(..), toFGL, lstmNeuron, NeuralNetwork.params, NeuralNetwork.init) where
+module NeuralNetwork(NeuralNetwork(..), toFGL, lstmNeuron, NeuralNetwork.params, NeuralNetwork.init, gd, mse, zero) where
 
 import Proofs
 import Data.Singletons
@@ -341,6 +341,7 @@ conc' :: List n a -> List m a -> List (Plus m n) a
 conc' x y = gcastWith (commutativity (Math.length x) (Math.length y)) $ conc x y
 
 getStatesAndOutputs :: NeuralNetwork n w s ps i o po u a -> (List s (Fin n), List o (Fin n))
+getStatesAndOutputs Empty = (Nil, Nil)
 getStatesAndOutputs (State nn f) =
   let
     (sss, ooo) = getStatesAndOutputs nn
@@ -398,30 +399,30 @@ eval nn w i (ps, po) =
   in
     (Math.map (\l -> Math.element l r) s, Math.map (\l -> Math.element l r) o)
 
-evalR' :: (Num a) => NeuralNetwork n w s s i o o u a -> List w a -> List ii (List i a) -> (List s a, List o a) -> (List s a, List (S ii) (List o a))
-evalR' nn w Nil (s, o) = (s, o `Cons` Nil)
-evalR' nn w (x `Cons` xs) i =
+evalR' :: (Num a) => NeuralNetwork n w s s i o o u a -> List w a -> [List i a] -> (List s a, List o a) -> (List s a, [List o a])
+evalR' nn w [] (s, o) = (s, [o])
+evalR' nn w (x:xs) i =
   let
     (s, oo) = evalR' nn w xs i
-    (s', o') = eval nn w x (s, Math.head oo)
+    (s', o') = eval nn w x (s, Prelude.head oo)
   in
-    (s', o' `Cons` oo)
+    (s', o':oo)
 
-evalR :: (Num a) => NeuralNetwork n w s s i o o u a -> List w a -> List ii (List i a) -> (List s a, List o a) -> (List s a, List ii (List o a))
+evalR :: (Num a) => NeuralNetwork n w s s i o o u a -> List w a -> [List i a] -> (List s a, List o a) -> (List s a, [List o a])
 evalR nn w xs i =
   let
-    (s, o) = evalR' nn w (Math.reverse xs) i
+    (s, o) = evalR' nn w (Prelude.reverse xs) i
   in
-    (s, Math.reverse $ Math.tail o)
+    (s, Prelude.reverse $ Prelude.tail o)
 
-error :: (Num a) => (List ii (List o a) -> a) -> NeuralNetwork n w s s i o o u a -> List w a -> List ii (List i a) -> (List s a, List o a) -> a
+error :: (Num a) => ([List o a] -> a) -> NeuralNetwork n w s s i o o u a -> List w a -> [List i a] -> (List s a, List o a) -> a
 error f nn w xs i =
   let
     (_, os) = evalR  nn w xs i
   in
     f os
 
-errorW :: (Num a) => (List ii (List o a) -> a) -> NeuralNetwork n w s s i o o u a -> List w a -> List ii (List i a) -> (List s a, List o a) -> Fin w -> a -> a
+{-errorW :: (Num a) => (List ii (List o a) -> a) -> NeuralNetwork n w s s i o o u a -> List w a -> List ii (List i a) -> (List s a, List o a) -> Fin w -> a -> a
 errorW f nn w xs i ww v =
   NeuralNetwork.error f nn (replace v ww w) xs i
 
@@ -436,12 +437,30 @@ fromList (SS sn) (h:t) =
   in
     if isNothing hh then Nothing
     else Just $ h `Cons` (fromJust hh)
-fromList _ _ = Nothing
+fromList _ _ = Nothing-}
 
-gradW :: forall a o w n s i u  ii t. (Num a, Fractional a, Ord a) => (forall a. (Num a) => List ii (List o a) -> a) -> (forall a. (Num a) => NeuralNetwork n w s s i o o u a) -> List ii (List i a) -> (List s a, List o a) -> List w a -> [List w a]
-gradW f nn xs i = gradientDescent go
-  where go :: forall t . (Scalar t ~ a, Mode t) => List w t -> t
-        go w = NeuralNetwork.error f nn w (fmap (fmap auto) xs) (fmap auto $ fst i, fmap auto $ snd i)
+mse' :: (Num a) => [List (S Z) a] -> [List (S Z) a] -> a
+mse' [] [] = 0
+mse' ((h `Cons` Nil):t) ((h' `Cons` Nil):t') =
+  let
+    e = mse' t t'
+  in
+    e + (h-h')*(h-h')
+
+mse :: (Fractional a) => [List (S Z) a] -> [List (S Z) a] -> a
+mse a b = (mse' a b) / (fromIntegral $ Prelude.length a)
+
+zero' :: (Num a) => SNat n -> List n a
+zero' SZ = Nil
+zero' (SS n) = 0 `Cons` (zero' n)
+
+zero :: (SingI n, Num a) => List n a
+zero = zero' sing
+
+gd :: forall a n w s i o u . (Floating a, Ord a, Enum a) => (forall a . (Enum a, Floating a) => [List o a] -> a) -> (forall a . (Floating a) => NeuralNetwork n w s s i o o u a) -> [List i a] -> (List s a, List o a) -> List w a -> [List w a]
+gd f nn xs i = gradientDescent e
+  where e :: forall t . (Enum t, Floating t, Scalar t ~ a, Mode t) => List w t -> t
+        e w = NeuralNetwork.error f nn w (fmap (fmap auto) xs) (fmap auto $ fst i, fmap auto $ snd i)
 
 data Proxy a = Proxy
 
