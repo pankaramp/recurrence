@@ -7,6 +7,7 @@ import Data.Singletons.TH
 import Data.Singletons.Prelude
 import Data.Promotion.Prelude
 import Data.Type.Equality
+import Unsafe.Coerce
 
 singletons [d|
               data Nat = Z | S Nat
@@ -137,13 +138,15 @@ conc (h `Cons` t) b = h `Cons` (conc t b)
 
 reverse'' :: SNat n -> SNat m -> List n a -> List m a -> List (Plus n m) a
 reverse'' SZ _ Nil acc = acc
-reverse'' (SS n) m (x `Cons` xs) acc = gcastWith (successor_of_sum n m) $ reverse'' n (SS m) xs (x `Cons` acc)
+{-reverse'' (SS n) m (x `Cons` xs) acc = gcastWith (successor_of_sum n m) $ reverse'' n (SS m) xs (x `Cons` acc)-}
+reverse'' (SS n) m (x `Cons` xs) acc = unsafeCoerce $ reverse'' n (SS m) xs (x `Cons` acc)
 
 reverse' :: List n a -> List m a -> List (Plus n m) a
 reverse' a b = reverse'' (Math.length a) (Math.length b) a b
 
 reverse :: List n a -> List n a
-reverse a = gcastWith (commutativity (Math.length a) SZ) $ reverse' a Nil
+{-reverse a = gcastWith (commutativity (Math.length a) SZ) $ reverse' a Nil-}
+reverse a = unsafeCoerce $ reverse' a Nil
 
 head :: List (S n) a -> a
 head (x `Cons` _) = x
