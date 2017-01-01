@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds, KindSignatures, GADTs, TemplateHaskell, ScopedTypeVariables, FlexibleContexts, Rank2Types #-}
 
-module NeuralNetwork(NeuralNetwork(..), toFGL, lstmNeuron, NeuralNetwork.params, NeuralNetwork.init, gd, mse, zero) where
+module NeuralNetwork(NeuralNetwork(..), toFGL, lstmNeuron, NeuralNetwork.params, NeuralNetwork.init, gd, mse, zero, lstmLayer, NN(..)) where
 
 import Proofs
 import Data.Singletons
@@ -15,6 +15,12 @@ import Numeric.AD
 import qualified Numeric.AD.Internal.Reverse as R
 import qualified Data.Reflection as Ref
 import Numeric.AD.Newton hiding (eval)
+
+data NN a where
+  NN :: forall a (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) . NeuralNetwork n w s ps i o po u a -> NN a
+
+data L a where
+    L :: forall a (n :: Nat)  . List n a -> L a
 
 data NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) a where
   Empty :: NeuralNetwork Z Z Z Z Z Z Z Z a
@@ -464,7 +470,7 @@ gd f nn xs i = gradientDescent e
 
 data Proxy a = Proxy
 
-init i = init' NeuralNetwork.Proxy i (SS SZ)
+init i = (NN $ init' NeuralNetwork.Proxy i (SS SZ), 0, [1..(toInt i)])
 
 init' :: (Num a) => NeuralNetwork.Proxy a -> SNat i -> SNat u -> NeuralNetwork (Plus i u) Z Z Z i Z Z u a
 init' a i (SS u) =
@@ -477,11 +483,32 @@ init' a (SS i) SZ =
     nn
 init' a SZ SZ = Empty
 
-{-lstmLayer  :: (Floating a) => SNat n -> NeuralNetwork k w s ps ii o po u a -> List i (Fin k) -> Fin k -> (NeuralNetwork $(tksizeN 25 8) $(twsizeN 4 4) (Plus n s) (Plus n ps) ii (Plus n o) (Plus n po) u a)
-lstmLayer SZ nn _ _ = nn
+mkFin :: SNat k -> Int -> Fin k
+mkFin (SS sn) 0 = ZF
+mkFin (SS sn) n = SF (mkFin sn $ n-1)
+
+mkFinList :: SNat k -> [Int] -> L (Fin k)
+mkFinList sk [] = L Nil
+mkFinList sk (h:t) =
+  case mkFinList sk t of
+    L l -> L $ (mkFin sk h) `Cons` l
+
+lstmLayer  :: (Floating a) => SNat n -> NN a -> [Int] -> Int -> (NN a, [Int])
+lstmLayer SZ nn _ _ = (nn, [])
 lstmLayer (SS sn) nn i u =
   let
-    nn' = lstmLayer sn nn i u
-    (nn'', _) = lstmNeuron nn' i u
+    (nn', os) = lstmLayer sn nn i u
+    (nn'', y) =
+      case nn' of
+        NN n ->
+          let
+            (k, _, _, _, _, _, _, _) = params n
+          in
+            case mkFinList k i of
+              L l ->
+                let
+                  (n', o) = lstmNeuron n l (mkFin k u)
+                in
+                  (NN n', (fToInt o):os)
   in
-    nn''-}
+    (nn'', y)
