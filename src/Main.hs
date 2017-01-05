@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, NoMonomorphismRestriction #-}
+{-# LANGUAGE DataKinds, NoMonomorphismRestriction, TypeOperators #-}
 
 module Main (main) where
 
@@ -8,19 +8,38 @@ import NeuralNetwork
 import Math
 import Proofs
 import Numeric.AD
+import Data.Type.Equality
+import Data.Singletons
 
+eq :: SNat n -> SNat m -> n :~: m
+eq SZ SZ = Refl
+eq (SS n) (SS m) = gcastWith (eq n m) Refl
+
+main :: IO ()
 main =
   let
-    (nn0, u, i) = NeuralNetwork.init (SS (SS SZ))
-    (nn1, o1) = lstmLayer (SS (SS SZ)) nn0 i u
+    (nn0, u, i) = NeuralNetwork.init (SS SZ)
+    (nn1, o1) = lstmLayer (SS (SS (SS SZ))) nn0 i u
+--    (nn2, o2) = lstmLayer (SS (SS (SS SZ))) nn1 o1 u
     (nn, o) = lstmLayer (SS SZ) nn1 o1 u
 --    (nn', o') = lstmNeuron nn (o `Cons` Nil) ZF
-{-    i = [1..1000]
-    x = fmap (\a -> ((a/1000.0) `Cons` Nil)) i
-    y = fmap (\a -> ((sin a) `Cons` Nil)) i-}
+    ii = [1..100]
+    x = fmap (\a -> ((a/100.0) `Cons` Nil)) ii :: [List (S Z) Double]
+    y = fmap (\a -> (((1 + sin (a/50)) / 2) `Cons` Nil)) ii
     dot = case nn of
       NN n -> showDot (fglToDot $ (toFGL n :: Gr String ()))
   in
-    --print $ take 10 $ gd (mse y) nn x (zero, zero) zero
     do
+      {-print y
+      case nn of
+        NN n ->
+          --print $ suffix (SS SZ) $ snd $ getStatesAndOutputs n
+          case params n of
+            (_, w, s, ps, SS SZ, o, po, _) ->
+              gcastWith (eq o po) $
+              withSingI (sPlus s (sPlus o w))$
+              gcastWith (eq s ps) $-}
+              --print $ Prelude.map (NeuralNetwork.error (SS SZ) (mse y) n x (zero, zero)) (take 10 $ gd (SS SZ) (mse y) n x (zero, zero) zero)
+              --print $ NeuralNetwork.evaluate (SS SZ) n x (Prelude.last $ take 40 $ gd (SS SZ) (mse y) n x zero)
+              --print $ Prelude.last $ take 2 $ gd (SS SZ) (mse y) n x (zero, zero) zero
       writeFile "file.dot" dot

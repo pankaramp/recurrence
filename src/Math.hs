@@ -1,6 +1,6 @@
-{-# LANGUAGE MultiParamTypeClasses, TemplateHaskell, KindSignatures, DataKinds, ScopedTypeVariables, GADTs, TypeFamilies, FlexibleInstances, TypeOperators, UndecidableInstances, InstanceSigs, FlexibleContexts, Rank2Types #-}
+{-# LANGUAGE MultiParamTypeClasses, TemplateHaskell, KindSignatures, DataKinds, ScopedTypeVariables, GADTs, TypeFamilies, FlexibleInstances, TypeOperators, UndecidableInstances, InstanceSigs, FlexibleContexts, RankNTypes #-}
 
-module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne, toList, fToInt, toInt, split, Math.map, Math.last, Math.length, range, element, Math.tail, Math.head, Math.reverse, replace, toFin) where
+module Math( Nat(..), Sing(..), SNat(..), NatMaybe(..), minus, plus, times, Math.pred, Minus, Plus, Times, Pred, fPlus, fPred, sPlus, sPred, sTimes, List(..), Fin(..), Function, DifferentiableFunction, commutativity, associativity, zero_right_identity, minus_pred, minus_pred_pred, minus_plus, minus_plus', successor_of_sum, prod, Math.sum, weaken, weakenList, Math.conc, Math.tanh, sigm, asFin, weakenOne, weakenListOne, toList, fToInt, toInt, split, Math.map, Math.last, Math.length, range, element, Math.tail, Math.head, Math.reverse, replace, toFin, label) where
 
 import Data.Singletons
 import Data.Singletons.TH
@@ -185,6 +185,9 @@ replace r ZF (_ `Cons` t) = r `Cons` t
 replace r (SF n) (h `Cons` t) = r `Cons` (replace r n t)
 
 type DifferentiableFunction n a = (Function n a, List n (Function n a), String)
+
+label :: DifferentiableFunction n a -> String
+label (_, _, l) = l
 
 prod :: (Num a) => SNat n -> DifferentiableFunction n a
 prod n = (op (*) 1, Math.map (opExcept (*) 1) (range n), "*")
