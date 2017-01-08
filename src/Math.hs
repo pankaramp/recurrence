@@ -62,7 +62,8 @@ associativity (SS n) m k = gcastWith (associativity n m k) Refl
 
 commutativity' :: SNat n -> SNat m -> Plus (S n) m :~: Plus n (S m)
 commutativity' SZ m = Refl
-commutativity' (SS n) m = gcastWith (commutativity' n m) Refl
+{-commutativity' (SS n) m = gcastWith (commutativity' n m) Refl-}
+commutativity' (SS n) m = unsafeCoerce Refl
 
 successor_of_sum :: SNat n -> SNat m -> S (Plus n m) :~: Plus n (S m)
 successor_of_sum n m =
@@ -72,12 +73,15 @@ successor_of_sum n m =
 
 commutativity :: SNat n -> SNat m -> Plus n m :~: Plus m n
 commutativity SZ SZ = Refl
-commutativity (SS n) SZ = gcastWith (commutativity n SZ) Refl
+{-commutativity (SS n) SZ = gcastWith (commutativity n SZ) Refl
 commutativity SZ (SS n) = gcastWith (commutativity SZ n) Refl
 commutativity (SS n) (SS m) =
   gcastWith (commutativity' n m) $
   gcastWith (commutativity (SS n) m) $
-  Refl
+  Refl-}
+commutativity (SS n) SZ = unsafeCoerce Refl
+commutativity SZ (SS n) = unsafeCoerce Refl
+commutativity (SS n) (SS m) = unsafeCoerce Refl
 
 zero_right_identity :: SNat n -> Plus n Z :~: n
 zero_right_identity n = gcastWith (commutativity n SZ) Refl

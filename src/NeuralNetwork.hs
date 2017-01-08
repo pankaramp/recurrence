@@ -31,7 +31,7 @@ data NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o ::
   Input :: NeuralNetwork (S Z) Z Z Z (S Z) Z Z Z
   PreviousOutput :: NeuralNetwork (S Z) Z Z Z Z Z (S Z) Z
   Output :: NeuralNetwork k w s ps i o po u -> Fin k -> NeuralNetwork (S k) w s ps i (S o) po u
-  Union :: NeuralNetwork n w1 s1 ps1 i1 o1 po1 u1 -> NeuralNetwork m w2 s2 ps2 i2 o2 po2 u2 -> NeuralNetwork (Plus n m) (Plus w1 w2) (Plus s1 s2) (Plus ps1 ps2) (Plus i1 i2) (Plus o1 o2) (Plus po1 po2) (Plus u1 u2)
+  Union :: (SingI n, SingI w1, SingI s1, SingI ps1, SingI i1, SingI o1, SingI po1, SingI u1, SingI m, SingI w2, SingI s2, SingI ps2, SingI i2, SingI o2, SingI po2, SingI u2) => NeuralNetwork n w1 s1 ps1 i1 o1 po1 u1 -> NeuralNetwork m w2 s2 ps2 i2 o2 po2 u2 -> NeuralNetwork (Plus n m) (Plus w1 w2) (Plus s1 s2) (Plus ps1 ps2) (Plus i1 i2) (Plus o1 o2) (Plus po1 po2) (Plus u1 u2)
   Operator :: NeuralNetwork k w s ps i o po u -> (forall a . Floating a => DifferentiableFunction n a) -> List n (Fin k) -> NeuralNetwork (S k) w s ps i o po u
 
 params :: NeuralNetwork k w s ps i o po u -> (SNat k, SNat w, SNat s, SNat ps, SNat i, SNat o, SNat po, SNat u)
@@ -51,10 +51,10 @@ params (Output nn _) =
     (k, w, s, ps, i, o, po, u) = params nn
   in
     (SS k, w, s, ps, i, SS o, po, u)
-params (Union nn1 nn2) =
+params (Union (nn1 :: NeuralNetwork n w1 s1 ps1 i1 o1 po1 u1) (nn2 :: NeuralNetwork m w2 s2 ps2 i2 o2 po2 u2)) =
   let
-    (k1, w1, s1, ps1, i1, o1, po1, u1) = params nn1
-    (k2, w2, s2, ps2, i2, o2, po2, u2) = params nn2
+    (k1, w1, s1, ps1, i1, o1, po1, u1) = (sing :: SNat n, sing :: SNat w1, sing :: SNat s1, sing :: SNat ps1, sing :: SNat i1, sing :: SNat o1, sing :: SNat po1, sing :: SNat u1)
+    (k2, w2, s2, ps2, i2, o2, po2, u2) = (sing :: SNat m, sing :: SNat w2, sing :: SNat s2, sing :: SNat ps2, sing :: SNat i2, sing :: SNat o2, sing :: SNat po2, sing :: SNat u2)
   in
     (sPlus k1 k2, sPlus w1 w2, sPlus s1 s2, sPlus ps1 ps2, sPlus i1 i2, sPlus o1 o2, sPlus po1 po2, sPlus u1 u2)
 params (Operator nn _ _) =
@@ -103,6 +103,14 @@ addWeight nn =
     gcastWith (commutativity o SZ) $
     gcastWith (commutativity po SZ) $
     gcastWith (commutativity u SZ) $
+    withSingI k $
+    withSingI w $
+    withSingI s $
+    withSingI ps $
+    withSingI ii $
+    withSingI o $
+    withSingI po $
+    withSingI u $
     Union nn Weight
 
 addWeightedEdge :: SNat k -> NeuralNetwork k w s ps i o po u -> Fin k -> (NeuralNetwork (S (S k)) (S w) s ps i o po u, Fin (S (S k)))
@@ -268,6 +276,14 @@ lstmNeuron1 nn =
     gcastWith (commutativity o SZ) $
     gcastWith (commutativity po (SS SZ)) $
     gcastWith (commutativity u SZ) $
+    withSingI k $
+    withSingI w $
+    withSingI s $
+    withSingI ps $
+    withSingI ii $
+    withSingI o $
+    withSingI po $
+    withSingI u $
     Union nn (Union PreviousOutput PreviousState)
 
 lstmNeuron2 :: NeuralNetwork (S (S k)) w s (S ps) ii o (S po) u -> List i (Fin k) -> Fin k -> (NeuralNetwork $(tksize 23 8) $(twsize 4 4) s (S ps) ii o (S po) u, Fin $(tksize 23 8), Fin $(tksize 23 8))
@@ -299,7 +315,7 @@ lstmNeuron nn i u =
 
 eval' :: (Floating a) => NeuralNetwork n w s ps i o po u -> List w a -> List ps a -> List po a -> List i a -> List n (Maybe a) -> List n a
 eval' Empty Nil Nil Nil Nil Nil = Nil
-eval' _ _ _ _ _ l@(_ `Cons` _) | isJust $ Math.last l = Math.map fromJust l
+--eval' _ _ _ _ _ l@(_ `Cons` _) | isJust $ Math.last l = Math.map fromJust l
 eval' Unity Nil Nil Nil Nil (Nothing `Cons` Nil) = 1 `Cons` Nil
 eval' Weight (v `Cons` Nil) Nil Nil Nil (Nothing `Cons` Nil) = (v `Cons` Nil)
 eval' PreviousState Nil (v `Cons` Nil) Nil Nil (Nothing `Cons` Nil) = (v `Cons` Nil)
@@ -321,10 +337,10 @@ eval' (State nn f) ws pss pos is ns =
     rrr = rr `Cons` Nil
   in
     gcastWith (commutativity (Math.length r) (SS SZ)) $ Math.conc r rrr
-eval' (Union nn1 nn2) ws pss pos is ns =
+eval' (Union (nn1 :: NeuralNetwork n w1 s1 ps1 i1 o1 po1 u1) (nn2 :: NeuralNetwork m w2 s2 ps2 i2 o2 po2 u2)) ws pss pos is ns =
   let
-    (k1, w1, s1, ps1, i1, o1, po1, u1) = params nn1
-    (k2, w2, s2, ps2, i2, o2, po2, u2) = params nn2
+    (k1, w1, s1, ps1, i1, o1, po1, u1) = (sing :: SNat n, sing :: SNat w1, sing :: SNat s1, sing :: SNat ps1, sing :: SNat i1, sing :: SNat o1, sing :: SNat po1, sing :: SNat u1)
+    (k2, w2, s2, ps2, i2, o2, po2, u2) = (sing :: SNat m, sing :: SNat w2, sing :: SNat s2, sing :: SNat ps2, sing :: SNat i2, sing :: SNat o2, sing :: SNat po2, sing :: SNat u2)
     (wa, wb) = split w1 w2 ws
     (psa, psb) = split ps1 ps2 pss
     (poa, pob) = split po1 po2 pos
@@ -365,8 +381,6 @@ getStatesAndOutputs (Operator nn _ _) =
     (weakenListOne (NeuralNetwork.size nn) sss, weakenListOne (NeuralNetwork.size nn) ooo)
 getStatesAndOutputs (Union nn1 nn2) =
   let
-    k1 = NeuralNetwork.size nn1
-    k2 = NeuralNetwork.size nn2
     (sss1, ooo1, sss2, ooo2) = getStatesAndOutputs' nn1 nn2
     (sss, ooo) = (Math.conc sss1 sss2, Math.conc ooo1 ooo2)
   in
@@ -377,11 +391,11 @@ getStatesAndOutputs Input = (Nil, Nil)
 getStatesAndOutputs PreviousState = (Nil, Nil)
 getStatesAndOutputs PreviousOutput = (Nil, Nil)
 
-getStatesAndOutputs' :: NeuralNetwork n1 w1 s1 ps1 i1 o1 po1 u1 -> NeuralNetwork n2 w2 s2 ps2 i2 o2 po2 u2 -> (List s1 (Fin (Plus n1 n2)), List o1 (Fin (Plus n1 n2)), List s2 (Fin (Plus n1 n2)), List o2 (Fin (Plus n1 n2)))
-getStatesAndOutputs' nn1 nn2 =
+getStatesAndOutputs' :: (SingI n1, SingI n2) => NeuralNetwork n1 w1 s1 ps1 i1 o1 po1 u1 -> NeuralNetwork n2 w2 s2 ps2 i2 o2 po2 u2 -> (List s1 (Fin (Plus n1 n2)), List o1 (Fin (Plus n1 n2)), List s2 (Fin (Plus n1 n2)), List o2 (Fin (Plus n1 n2)))
+getStatesAndOutputs' (nn1 :: NeuralNetwork n1 w1 s1 ps1 i1 o1 po1 u1) (nn2 :: NeuralNetwork n2 w2 s2 ps2 i2 o2 po2 u2) =
   let
-    k1 = NeuralNetwork.size nn1
-    k2 = NeuralNetwork.size nn2
+    k1 = sing :: SNat n1
+    k2 = sing :: SNat n2
     (sss1, ooo1) = getStatesAndOutputs nn1
     (sss2, ooo2) = getStatesAndOutputs nn2
     sss1' = gcastWith (minus_plus k1 k2) $ weakenList (sPlus k1 k2) k1 k2 sss1
@@ -397,20 +411,20 @@ eval'' sn nn w ps po i = eval' nn w ps po i (Math.map (\_ -> Nothing) (range sn)
 eval''' :: (Floating a) => NeuralNetwork n w s ps i o po u -> List w a -> List ps a -> List po a -> List i a -> List n a
 eval''' nn = eval'' (NeuralNetwork.size nn) nn
 
-eval :: (Floating a) => NeuralNetwork n w s ps i o po u -> List w a -> List i a -> (List ps a, List po a) -> (List s a, List o a)
-eval nn w i (ps, po) =
+eval :: (Floating a) => (List s (Fin n), List o (Fin n)) -> NeuralNetwork n w s ps i o po u -> List w a -> List i a -> (List ps a, List po a) -> (List s a, List o a)
+eval so nn w i (ps, po) =
   let
     r = eval''' nn w ps po i
-    (s, o) = getStatesAndOutputs nn
+    (s, o) = so
   in
     (Math.map (\l -> Math.element l r) s, Math.map (\l -> Math.element l r) o)
 
-evalR' :: (Floating a) => NeuralNetwork n w s s i o o u -> List w a -> [List i a] -> (List s a, List o a) -> (List s a, [List o a])
-evalR' nn w [] (s, o) = (s, [o])
-evalR' nn w (x:xs) i =
+evalR' :: (Floating a) => (List s (Fin n), List o (Fin n)) -> NeuralNetwork n w s s i o o u -> List w a -> [List i a] -> (List s a, List o a) -> (List s a, [List o a])
+evalR' so nn w [] (s, o) = (s, [o])
+evalR' so nn w (x:xs) i =
   let
-    (s, oo) = evalR' nn w xs i
-    (s', o') = eval nn w x (s, Prelude.head oo)
+    (s, oo) = evalR' so nn w xs i
+    (s', o') = eval so nn w x (s, Prelude.head oo)
   in
     (s', o':oo)
 
@@ -424,18 +438,18 @@ prefix m l = prefix' (Math.length l) m l
 suffix :: SNat m -> List n a -> List m a
 suffix m = Math.reverse . (prefix m) . Math.reverse
 
-evalR :: (Floating a) => SNat f -> NeuralNetwork n w s s i o o u -> List w a -> [List i a] -> (List s a, List o a) -> (List s a, [List f a])
-evalR f nn w xs i =
+evalR :: (Floating a) => (List s (Fin n), List o (Fin n)) -> SNat f -> NeuralNetwork n w s s i o o u -> List w a -> [List i a] -> (List s a, List o a) -> (List s a, [List f a])
+evalR so f nn w xs i =
   let
-    (s, o') = evalR' nn w (Prelude.reverse xs) i
+    (s, o') = evalR' so nn w (Prelude.reverse xs) i
     o = fmap (suffix f) o'
   in
     (s, Prelude.tail $ Prelude.reverse o)
 
-error :: (Floating a) => SNat f -> ([List f a] -> a) -> NeuralNetwork n w s s i o o u -> [List i a] -> (List s a, List o a) ->  List w a -> a
-error sf f nn xs i w =
+error :: (Floating a) => (List s (Fin n), List o (Fin n)) -> SNat f -> ([List f a] -> a) -> NeuralNetwork n w s s i o o u -> [List i a] -> (List s a, List o a) ->  List w a -> a
+error so sf f nn xs i w =
   let
-    (_, os) = evalR sf nn w xs i
+    (_, os) = evalR so sf nn w xs i
   in
     f os
 
@@ -445,7 +459,7 @@ evaluate sf nn xs l =
     (_, sw, ss, _, _, so, _, _) = params nn
     (s, ow) = split ss (sPlus so sw) l
     (o, w) = split so sw ow
-    (_, os) = evalR sf nn w xs (s, o)
+    (_, os) = evalR (getStatesAndOutputs nn) sf nn w xs (s, o)
   in
     os
 
@@ -487,13 +501,14 @@ zero = zero' sing
 gd :: forall a f n w s i o u . (Floating a, Ord a, Enum a) => SNat f -> (forall b . (Enum b, Floating b) => [List f b] -> b) -> NeuralNetwork n w s s i o o u -> [List i a] -> List (Plus s (Plus o w)) a -> [List (Plus s (Plus o w)) a]
 gd sf f nn xs = gradientDescent e
   where (_, sw, ss, _, _, so, _, _) = params nn
+        sao = getStatesAndOutputs nn
         e :: forall t . (Enum t, Floating t, Scalar t ~ a, Mode t) => List (Plus s (Plus o w)) t -> t
         e l =
           let
             (s, ow) = split ss (sPlus so sw) l
             (o, w) = split so sw ow
           in
-            NeuralNetwork.error sf f nn (fmap (fmap auto) xs) (s, o) w
+            NeuralNetwork.error sao sf f nn (fmap (fmap auto) xs) (s, o) w
 
 data Proxy a = Proxy
 
@@ -501,11 +516,11 @@ init i = (NN $ init' i (SS SZ), 0, [1..(toInt i)])
 
 init' :: SNat i -> SNat u -> NeuralNetwork (Plus i u) Z Z Z i Z Z u
 init' i (SS u) =
-  gcastWith (successor_of_sum i u) $ Union Unity (NeuralNetwork.init' i u)
+  gcastWith (successor_of_sum i u) $ withSingI (sPlus i u) $ withSingI i $ withSingI u $ Union Unity (NeuralNetwork.init' i u)
 init' (SS i) SZ =
   let
     nn' = NeuralNetwork.init' i SZ
-    nn = Union Input nn'
+    nn = withSingI (sPlus i SZ) $ withSingI i $ Union Input nn'
   in
     nn
 init' SZ SZ = Empty
