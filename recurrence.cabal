@@ -52,8 +52,9 @@ executable recurrence
   -- .hs or .lhs file containing the Main module.
   main-is:             Main.hs
 
-  ghc-options:         "-with-rtsopts=-p -hc -xc"
+  ghc-options:         "-with-rtsopts=-p -hc -xc -N"
                        -auto-all
+                       -threaded
                        -caf-all
                        -O2
   

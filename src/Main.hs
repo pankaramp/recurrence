@@ -39,7 +39,10 @@ main =
               gcastWith (eq o po) $
               withSingI (sPlus s (sPlus o w))$
               gcastWith (eq s ps) $
+              withSingI s $
+              withSingI o $
+              withSingI w $
               --print $ Prelude.map (NeuralNetwork.error (SS SZ) (mse y) n x (zero, zero)) (take 10 $ gd (SS SZ) (mse y) n x (zero, zero) zero)
-              print $ NeuralNetwork.evaluate (SS SZ) n x (Prelude.last $ take 40 $ gd (SS SZ) (mse y) n x zero)
+              print $ NeuralNetwork.evaluate (SS SZ) n x (Prelude.last $ take 20 $ gd (SS SZ) (mse y) n x zero)
               --print $ Prelude.last $ take 2 $ gd (SS SZ) (mse y) n x (zero, zero) zero
       --writeFile "file.dot" dot
