@@ -72,7 +72,8 @@ executable recurrence
                        template-haskell >= 2.10 && < 2.12,
                        type-level-sets >= 0.5 && < 0.6,
                        ad >= 4.3 && < 4.4,
-                       reflection >= 2.1 && < 2.2
+                       reflection >= 2.1 && < 2.2,
+                       accelerate >= 0.15 && < 0.16
   
   -- Directories containing source files.
   hs-source-dirs:      src
@@ -100,7 +101,8 @@ library
                        template-haskell >= 2.10 && < 2.12,
                        type-level-sets >= 0.5 && < 0.6,
                        ad >= 4.3 && < 4.4,
-                       reflection >= 2.1 && < 2.2
+                       reflection >= 2.1 && < 2.2,
+                       accelerate >= 0.15 && < 0.16
   
   -- Directories containing source files.
   hs-source-dirs:      src

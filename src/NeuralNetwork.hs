@@ -31,26 +31,36 @@ fromList (SS sn) (h:t) = h `Cons` (fromList sn t)
 toFunction :: SNat n -> Function n a -> [a] -> a
 toFunction sn f = f . (fromList sn)
 
-toNodeList :: (Floating a) => NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> ([Node a],(Int, Int, Int, Int, Int, Int))
-toNodeList nn = toNodeList' nn ([], (0, 0, 0, 0, 0, 0))
+toNodeList :: (Floating a) => NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> [[Node a]]
+toNodeList nn =
+  let
+    (l, _) = toNodeList' nn ([], (0, 0, 0, 0, 0, 0))
+    r = Prelude.reverse l
+    m = foldr max 0 $ Prelude.map snd r
+  in
+    Prelude.map (\n -> Prelude.map fst $ filter (\x -> snd x == n) $ r) [0..m]
 
-toNodeList' :: (Floating a) => NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> ([Node a], (Int, Int, Int, Int, Int, Int)) -> ([Node a],(Int, Int, Int, Int, Int, Int))
+toNodeList' :: (Floating a) => NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> ([(Node a, Int)], (Int, Int, Int, Int, Int, Int)) -> ([(Node a, Int)],(Int, Int, Int, Int, Int, Int))
 toNodeList' Empty (l, p) = (l, p)
-toNodeList' Unity (l, p) = (U:l, p)
-toNodeList' PreviousState (l, (ps, st, w, i, po, o)) = ((PS ps):l, (ps+1, st, w, i, po, o))
+toNodeList' Unity (l, p) = ((U, 0):l, p)
+toNodeList' PreviousState (l, (ps, st, w, i, po, o)) = ((PS ps, 0):l, (ps+1, st, w, i, po, o))
 toNodeList' (State nn f) (l, p) =
   let
     (l', (ps, st, w, i, po, o)) = toNodeList' nn (l, p)
+    f' = fToInt f
+    (_, r) =  (Prelude.reverse l') !! f'
   in
-    ((St st (fToInt f)):l', (ps, st+1, w, i, po, o))
-toNodeList' Weight (l, (ps, st, w, i, po, o)) = ((W w):l, (ps, st, w+1, i, po, o))
-toNodeList' Input (l, (ps, st, w, i, po, o)) = ((I i):l, (ps, st, w, i+1, po, o))
-toNodeList' PreviousOutput (l, (ps, st, w, i, po, o)) = ((PO po):l, (ps, st, w, i, po+1, o))
+    ((St st f', r+1):l', (ps, st+1, w, i, po, o))
+toNodeList' Weight (l, (ps, st, w, i, po, o)) = ((W w, 0):l, (ps, st, w+1, i, po, o))
+toNodeList' Input (l, (ps, st, w, i, po, o)) = ((I i, 0):l, (ps, st, w, i+1, po, o))
+toNodeList' PreviousOutput (l, (ps, st, w, i, po, o)) = ((PO po, 0):l, (ps, st, w, i, po+1, o))
 toNodeList' (Output nn f) (l, p) =
   let
     (l', (ps, st, w, i, po, o)) = toNodeList' nn (l, p)
+    f' = fToInt f
+    (_, r) =  (Prelude.reverse l') !! f'
   in
-    ((O o (fToInt f)):l', (ps, st, w, i, po, o+1))
+    ((O o f', r+1):l', (ps, st, w, i, po, o+1))
 toNodeList' (Union nn1 nn2) (l, p) =
   let
     (l', p') = toNodeList' nn1 (l, p)
@@ -59,9 +69,11 @@ toNodeList' (Union nn1 nn2) (l, p) =
 toNodeList' (Operator nn df x) (l, p) =
   let
     (l', p') = toNodeList' nn (l, p)
+    xx = Prelude.map fToInt $ toList x
+    r = foldr max 0 $ Prelude.map (snd . ((Prelude.reverse l') !!)) xx
     (f, _, _) = df
   in
-    ((Op (toFunction (Math.length x) f) (Prelude.map fToInt $ toList x)):l', p')
+    ((Op (toFunction (Math.length x) f) xx, r+1):l', p')
 
 data NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) where
   Empty :: NeuralNetwork Z Z Z Z Z Z Z Z
