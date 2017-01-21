@@ -216,8 +216,10 @@ weakenList sm sn sk = Math.map (weaken sm sn sk)
 toFunction :: (a -> a) -> Function (S Z) a
 toFunction f (x `Cons` Nil) = f x
 
+tnh x = ((exp x) - (exp (-x))) / ((exp x) + (exp (-x)))
+
 tanh :: (Floating a) => DifferentiableFunction (S Z) a
-tanh = (toFunction Prelude.tanh, (toFunction (\x -> 1 - (Prelude.tanh x) ^ 2)) `Cons` Nil, "tanh")
+tanh = (toFunction tnh, (toFunction (\x -> 1 - (tnh x) ^ 2)) `Cons` Nil, "tanh")
 
 sigmoid :: (Floating a) => a -> a
 sigmoid x = 1 / (1 + exp (-x))

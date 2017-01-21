@@ -1,8 +1,9 @@
-{-# LANGUAGE DataKinds, KindSignatures, GADTs, TemplateHaskell, ScopedTypeVariables, FlexibleContexts, Rank2Types #-}
+{-# LANGUAGE DataKinds, KindSignatures, GADTs, TemplateHaskell, ScopedTypeVariables, FlexibleContexts, Rank2Types, MultiParamTypeClasses, TypeFamilies #-}
 
-module NeuralNetwork(NeuralNetwork(..), lstmNeuron, NeuralNetwork.params, NeuralNetwork.init, gd, mse, zero, lstmLayer, NN(..), NeuralNetwork.error, evaluate, getStatesAndOutputs, suffix, toFGL) where
+module NeuralNetwork(NeuralNetwork(..), lstmNeuron, NeuralNetwork.params, NeuralNetwork.init, gd, mse, zero, lstmLayer, NN(..), NeuralNetwork.error, evaluate, getStatesAndOutputs, suffix, toFGL, evalA, zeroA) where
 
 import Proofs
+import Data.List
 import Data.Singletons
 import Data.Singletons.TH
 import Data.Singletons.Prelude
@@ -15,6 +16,8 @@ import Numeric.AD
 import qualified Numeric.AD.Internal.Reverse as R
 import qualified Data.Reflection as Ref
 import Numeric.AD.Newton hiding (eval)
+import qualified Data.Array.Accelerate as A
+import Debug.Trace
 
 data NN where
   NN :: forall (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) . NeuralNetwork n w s ps i o po u -> NN
@@ -24,6 +27,8 @@ data L a where
 
 data Node a = U | PS Int | St Int Int | W Int | I Int | PO Int | O Int Int | Op ([a] -> a) [Int]
 
+zeroA i = A.fill (A.index1 $ A.constant i) 0.5
+
 fromList :: SNat n -> [a] -> List n a
 fromList SZ [] = Nil
 fromList (SS sn) (h:t) = h `Cons` (fromList sn t)
@@ -31,14 +36,41 @@ fromList (SS sn) (h:t) = h `Cons` (fromList sn t)
 toFunction :: SNat n -> Function n a -> [a] -> a
 toFunction sn f = f . (fromList sn)
 
-toNodeList :: (Floating a) => NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> [[Node a]]
+evalNode :: Node (A.Exp Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Exp Double
+evalNode U w ps i po v = 1
+evalNode (PS x) w ps i po v = ps A.!! (A.constant x)
+evalNode (St _ x) w ps i po v = v A.!! (A.constant x)
+evalNode (W x) w ps i po v = w A.!! (A.constant x)
+evalNode (I x) w ps i po v = i A.!! (A.constant x)
+evalNode (PO x) w ps i po v = po A.!! (A.constant x)
+evalNode (O _ x) w ps i po v = v A.!! (A.constant x)
+evalNode (Op f xs) w ps i po v = f (Prelude.map (\x -> v A.!! (A.constant x)) $ xs)
+
+evalA :: NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double)
+evalA nn w ps i po = evalNodeList (toNodeList nn) w ps i po
+
+evalNodeList :: [[(Node (A.Exp Double), Int)]] -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double)
+evalNodeList l w ps i po = evalNodeList' l w ps i po (A.fill (A.index1 $ A.constant $ foldr ((+) . Prelude.length) 0 l) 0)
+
+evalNodeList' :: [[(Node (A.Exp Double), Int)]] -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double)
+evalNodeList' [] _ _ _ _ v = v
+evalNodeList' (l:lt) w ps i po v =
+  let
+    l' = Prelude.map (\(x, ii) -> (A.fill (A.index1 $ A.constant 1) $ A.lift $ (evalNode x w ps i po v, A.index1 $ A.constant ii))) l
+    a = foldl1' (A.++) l'
+    (e, t) = A.unzip a
+    t' = A.map A.unindex1 t
+  in
+    evalNodeList' lt w ps i po (A.scatter t' v e)
+
+toNodeList :: (Floating a) => NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> [[(Node a, Int)]]
 toNodeList nn =
   let
-    (l, _) = toNodeList' nn ([], (0, 0, 0, 0, 0, 0))
-    r = Prelude.reverse l
-    m = foldr max 0 $ Prelude.map snd r
+    (l, _) = toNodeList' nn ([], (0, 0, 0, 0, 0, 0))    
+    r = zip (Prelude.reverse l) [0..]
+    m = foldr max 0 $ Prelude.map (snd . fst) r
   in
-    Prelude.map (\n -> Prelude.map fst $ filter (\x -> snd x == n) $ r) [0..m]
+    Prelude.map (\n -> Prelude.map (\((a, b), c) -> (a, c)) $ filter (\x -> (snd . fst) x == n) $ r) [0..m]
 
 toNodeList' :: (Floating a) => NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> ([(Node a, Int)], (Int, Int, Int, Int, Int, Int)) -> ([(Node a, Int)],(Int, Int, Int, Int, Int, Int))
 toNodeList' Empty (l, p) = (l, p)

@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, NoMonomorphismRestriction, TypeOperators #-}
+{-# LANGUAGE DataKinds, NoMonomorphismRestriction, TypeOperators, TypeFamilies #-}
 
 module Main (main) where
 
@@ -30,19 +30,20 @@ main =
       --NN n -> showDot (fglToDot $ (toFGL n :: Gr String ()))
   in
     do
-      print y
+--      print y
       case nn of
         NN n ->
           --print $ suffix (SS SZ) $ snd $ getStatesAndOutputs n
           case params n of
             (_, w, s, ps, SS SZ, o, po, _) ->
-              gcastWith (eq o po) $
+              print $ evalA n (zeroA $ toInt w) (zeroA $ toInt ps) (zeroA $ 1) (zeroA $ toInt po)
+              {-gcastWith (eq o po) $
               withSingI (sPlus s (sPlus o w))$
               gcastWith (eq s ps) $
               withSingI s $
               withSingI o $
-              withSingI w $
+              withSingI w $-}
               --print $ Prelude.map (NeuralNetwork.error (SS SZ) (mse y) n x (zero, zero)) (take 10 $ gd (SS SZ) (mse y) n x (zero, zero) zero)
-              print $ NeuralNetwork.evaluate (SS SZ) n x (Prelude.last $ take 20 $ gd (SS SZ) (mse y) n x zero)
+              --print $ NeuralNetwork.evaluate (SS SZ) n x (Prelude.last $ take 20 $ gd (SS SZ) (mse y) n x zero)
               --print $ Prelude.last $ take 2 $ gd (SS SZ) (mse y) n x (zero, zero) zero
       --writeFile "file.dot" dot
