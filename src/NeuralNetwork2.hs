@@ -65,8 +65,8 @@ data NeuralNetwork (n :: Nat) (l :: [(Nat, (Nat, Nat))]) where
   State :: (Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> NeuralNetwork (n+1) l
   Output :: (Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> NeuralNetwork (n+1) l
   Union :: NeuralNetwork n1 l1 -> NeuralNetwork n2 l2 -> NeuralNetwork (n1 + n2) (Union l1 (Map (MSym1 n1) l2))
-  Unary :: (Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> (forall a . UnaryFunction a w h w h) -> NeuralNetwork (n+1) ('(n, '(w, h)) ': l)
-  Binary :: (Find '(i, '(w, h)) l ~ True, Find '(j, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> SNat j -> SNat w' -> SNat h' -> (forall a . BinaryFunction a w h w' h' w'' h'') -> NeuralNetwork (n+1) ('(n, '(w'', h'')) ': l)
+  Unary :: (Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> (forall a . UnaryFunction a w h w' h') -> String -> NeuralNetwork (n+1) ('(n, '(w, h)) ': l)
+  Binary :: (Find '(i, '(w, h)) l ~ True, Find '(j, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> SNat j -> SNat w' -> SNat h' -> (forall a . BinaryFunction a w h w' h' w'' h'') -> String -> NeuralNetwork (n+1) ('(n, '(w'', h'')) ': l)
 
 val :: Sing (n :: Nat) -> Int
 val sn = fromInteger $ withKnownNat sn $ natVal sn
@@ -89,6 +89,21 @@ toFGL' g (Output nn i w h) =
     g' = toFGL' g  nn
   in
   ([((show $ val w)++"x"++(show $ val h), val i)], noNodes g', "O"++(show $ val w)++"x"++(show $ val h), []) & g'
+toFGL' g (Union nn1 nn2) = toFGL' (toFGL' g nn1) nn2
+toFGL' g (Unary nn i sw sh f l) =
+  let
+    g' = toFGL' g  nn
+  in
+  ([((show $ val sw)++"x"++(show $ val sh), val i)], noNodes g', l, []) & g'
+toFGL' g (Binary nn i sw sh j sw' sh' f l) =
+  let
+    g' = toFGL' g  nn
+  in
+  ([((show $ val sw)++"x"++(show $ val sh), val i), ((show $ val sw')++"x"++(show $ val sh'), val j)], noNodes g', l, []) & g'
 
 toFGL :: DynGraph gr => NeuralNetwork n l -> gr String String
 toFGL = toFGL' empty
+
+addWeight :: SNat w -> SNat h -> NeuralNetwork n l -> NeuralNetwork (n+1) ('(n, '(w, h)) ': l)
+addWeight sw sh nn =
+    Union nn (Weight sw sh)
