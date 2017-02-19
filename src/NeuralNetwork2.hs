@@ -1,13 +1,15 @@
 {-# LANGUAGE DataKinds, KindSignatures, TypeOperators, GADTs, TemplateHaskell, TypeFamilies, UndecidableInstances, Rank2Types, AllowAmbiguousTypes, ScopedTypeVariables #-}
+{-# OPTIONS_GHC -fplugin=TypeNatSolver #-}
 
 module NeuralNetwork2 where
 
-import Data.Type.List
+import qualified Data.Type.List as L
 import GHC.TypeLits
 import Data.Singletons
 import Data.Promotion.TH
 import Data.Singletons.TypeLits
 import Data.Singletons.Prelude.Num
+import Data.Singletons.Prelude.List
 import Data.Array.IArray
 import Data.Graph.Inductive
 
@@ -56,17 +58,17 @@ prod a1 a2 = array resultBounds [((i,j), Prelude.sum [a1!(i, k) * a2!(k, j)
 
 data NeuralNetwork (n :: Nat) (l :: [(Nat, (Nat, Nat))]) where
   Empty :: NeuralNetwork 0 '[]
-  Close :: NeuralNetwork n l -> SNat i -> NeuralNetwork n (Remove '(i, (Lookup i l)) l)
+  Close :: NeuralNetwork n l -> SNat i -> NeuralNetwork n (L.Remove '(i, (L.Lookup i l)) l)
   Unity :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
   Weight :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
   Input :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
   PreviousState :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
   PreviousOutput :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
-  State :: (Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> NeuralNetwork (n+1) l
-  Output :: (Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> NeuralNetwork (n+1) l
-  Union :: NeuralNetwork n1 l1 -> NeuralNetwork n2 l2 -> NeuralNetwork (n1 + n2) (Union l1 (Map (MSym1 n1) l2))
-  Unary :: (Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> (forall a . UnaryFunction a w h w' h') -> String -> NeuralNetwork (n+1) ('(n, '(w, h)) ': l)
-  Binary :: (Find '(i, '(w, h)) l ~ True, Find '(j, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> SNat j -> SNat w' -> SNat h' -> (forall a . BinaryFunction a w h w' h' w'' h'') -> String -> NeuralNetwork (n+1) ('(n, '(w'', h'')) ': l)
+  State :: (L.Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> NeuralNetwork (n+1) l
+  Output :: (L.Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> NeuralNetwork (n+1) l
+  Union :: NeuralNetwork n1 l1 -> NeuralNetwork n2 l2 -> NeuralNetwork (n1 + n2) (Concat (l1 ': (Map (MSym1 n1) l2) ': '[]))
+  Unary :: (L.Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> (forall a . UnaryFunction a w h w' h') -> String -> NeuralNetwork (n+1) ('(n, '(w, h)) ': l)
+  Binary :: (L.Find '(i, '(w, h)) l ~ True, L.Find '(j, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> SNat j -> SNat w' -> SNat h' -> (forall a . BinaryFunction a w h w' h' w'' h'') -> String -> NeuralNetwork (n+1) ('(n, '(w'', h'')) ': l)
 
 val :: Sing (n :: Nat) -> Int
 val sn = fromInteger $ withKnownNat sn $ natVal sn
@@ -104,6 +106,6 @@ toFGL' g (Binary nn i sw sh j sw' sh' f l) =
 toFGL :: DynGraph gr => NeuralNetwork n l -> gr String String
 toFGL = toFGL' empty
 
-addWeight :: SNat w -> SNat h -> NeuralNetwork n l -> NeuralNetwork (n+1) ('(n, '(w, h)) ': l)
+addWeight :: SNat w -> SNat h -> NeuralNetwork n l -> NeuralNetwork (n+1) (Concat (l ': ('(n, '(w, h)) ': '[]) ': '[]))
 addWeight sw sh nn =
     Union nn (Weight sw sh)

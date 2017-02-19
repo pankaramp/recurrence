@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, KindSignatures, GADTs, TemplateHaskell, ScopedTypeVariables, FlexibleContexts, Rank2Types, MultiParamTypeClasses, TypeFamilies #-}
+{-# LANGUAGE DataKinds, KindSignatures, GADTs, TemplateHaskell, ScopedTypeVariables, FlexibleContexts, Rank2Types, MultiParamTypeClasses, TypeFamilies, FlexibleInstances #-}
 
 module NeuralNetwork(NeuralNetwork(..), lstmNeuron, NeuralNetwork.params, NeuralNetwork.init, gd, mse, zero, lstmLayer, NN(..), NeuralNetwork.error, evaluate, getStatesAndOutputs, suffix, toFGL, evalA, zeroA) where
 
@@ -17,7 +17,37 @@ import qualified Numeric.AD.Internal.Reverse as R
 import qualified Data.Reflection as Ref
 import Numeric.AD.Newton hiding (eval)
 import qualified Data.Array.Accelerate as A
-import Debug.Trace
+import Data.Type.List
+
+data ValueAndDerivative a = ValueAndDerivative a a
+  deriving Show
+
+instance (Num a) => (Num (ValueAndDerivative a)) where
+  (ValueAndDerivative a b) + (ValueAndDerivative c d) = ValueAndDerivative (a + c) (b + d)
+  (ValueAndDerivative a b) * (ValueAndDerivative c d) = ValueAndDerivative (a * c) (a * d + b * c)
+  abs (ValueAndDerivative a b) = ValueAndDerivative (abs a) ((signum a) * b)
+  signum (ValueAndDerivative a b) = ValueAndDerivative (signum a) 0
+  negate (ValueAndDerivative a b) = ValueAndDerivative (negate a) (negate b)
+  fromInteger a = ValueAndDerivative (fromInteger a) 0
+
+type instance EltRepr  = EltRepr (Position, Direction, Colour, Float)
+
+{-instance Elt Plane where
+  eltType (_ :: Plane)          = eltType (undefined :: (Position, Direction, Colour, Float))
+  toElt plane                   = let (p,n,c,s) = toElt plane in Plane p n c s
+  fromElt (Plane p n c s)       = fromElt (p, n, c, s)
+
+instance IsProduct Elt Plane where
+  type ProdRepr Plane = ProdRepr (Position, Direction, Colour, Float)
+  fromProd _ (Plane p n c s)     = fromTuple (p, n, c, s)
+  toProd _ t                     = let (p, n, c, s) = toTuple t in Plane p n c s
+  prod cst _                     = prod cst (undefined :: (Position, Direction, Colour, Float))
+
+instance Lift Exp Plane where
+  type Plain Plane = Plane
+  lift (Plane p n c s)
+      = Exp . Tuple
+      $ NilTup `SnocTup` lift p `SnocTup` lift n `SnocTup` lift c `SnocTup` lift s-}
 
 data NN where
   NN :: forall (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) . NeuralNetwork n w s ps i o po u -> NN
@@ -36,7 +66,7 @@ fromList (SS sn) (h:t) = h `Cons` (fromList sn t)
 toFunction :: SNat n -> Function n a -> [a] -> a
 toFunction sn f = f . (fromList sn)
 
-evalNode :: Node (A.Exp Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Exp Double
+evalNode :: (A.IsNum a, A.Elt a) => Node (A.Exp a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Exp a
 evalNode U w ps i po v = 1
 evalNode (PS x) w ps i po v = ps A.!! (A.constant x)
 evalNode (St _ x) w ps i po v = v A.!! (A.constant x)
@@ -46,13 +76,13 @@ evalNode (PO x) w ps i po v = po A.!! (A.constant x)
 evalNode (O _ x) w ps i po v = v A.!! (A.constant x)
 evalNode (Op f xs) w ps i po v = f (Prelude.map (\x -> v A.!! (A.constant x)) $ xs)
 
-evalA :: NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double)
+evalA :: (A.IsNum a, A.Elt a, A.IsFloating a) => NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a)
 evalA nn w ps i po = evalNodeList (toNodeList nn) w ps i po
 
-evalNodeList :: [[(Node (A.Exp Double), Int)]] -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double)
+evalNodeList :: (A.IsNum a, A.Elt a) => [[(Node (A.Exp a), Int)]] -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a)
 evalNodeList l w ps i po = evalNodeList' l w ps i po (A.fill (A.index1 $ A.constant $ foldr ((+) . Prelude.length) 0 l) 0)
 
-evalNodeList' :: [[(Node (A.Exp Double), Int)]] -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double) -> A.Acc (A.Vector Double)
+evalNodeList' :: (A.IsNum a, A.Elt a) => [[(Node (A.Exp a), Int)]] -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a) -> A.Acc (A.Vector a)
 evalNodeList' [] _ _ _ _ v = v
 evalNodeList' (l:lt) w ps i po v =
   let
@@ -107,12 +137,12 @@ toNodeList' (Operator nn df x) (l, p) =
   in
     ((Op (toFunction (Math.length x) f) xx, r+1):l', p')
 
-data NeuralNetwork (n :: Nat) (w :: Nat) (s :: Nat) (ps :: Nat) (i :: Nat) (o :: Nat) (po :: Nat) (u :: Nat) where
-  Empty :: NeuralNetwork Z Z Z Z Z Z Z Z
-  Unity :: NeuralNetwork (S Z) Z Z Z Z Z Z (S Z)
+data NeuralNetwork (l :: [(Int, Int)]) where
+  Empty :: NeuralNetwork []
+  Unity :: SNat w -> SNat h -> NeuralNetwork [(w, h)]
   PreviousState :: NeuralNetwork (S Z) Z Z (S Z) Z Z Z Z
   State :: NeuralNetwork k w s ps i o po u -> Fin k -> NeuralNetwork (S k) w (S s) ps i o po u
-  Weight :: NeuralNetwork (S Z) (S Z) Z Z Z Z Z Z
+  Weight :: SNat w -> SNat h -> NeuralNetwork [(w, h)
   Input :: NeuralNetwork (S Z) Z Z Z (S Z) Z Z Z
   PreviousOutput :: NeuralNetwork (S Z) Z Z Z Z Z (S Z) Z
   Output :: NeuralNetwork k w s ps i o po u -> Fin k -> NeuralNetwork (S k) w s ps i (S o) po u
