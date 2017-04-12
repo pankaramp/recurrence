@@ -76,7 +76,7 @@ executable recurrence
                        accelerate >= 0.15 && < 0.16,
                        type-list >= 0.5 && < 0.6,
                        array >= 0.5.1 && < 0.6,
-                       type-nat-solver >= 0.1 && < 0.2
+                       ghc-typelits-natnormalise >= 0.5.2 && < 0.6
   
   -- Directories containing source files.
   hs-source-dirs:      src
@@ -108,7 +108,7 @@ library
                        accelerate >= 0.15 && < 0.16,
                        type-list >= 0.5 && < 0.6,
                        array >= 0.5.1 && < 0.6,
-                       type-nat-solver >= 0.1 && < 0.2
+                       ghc-typelits-natnormalise >= 0.5.2 && < 0.6
   
   -- Directories containing source files.
   hs-source-dirs:      src

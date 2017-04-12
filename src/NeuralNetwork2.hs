@@ -1,22 +1,27 @@
 {-# LANGUAGE DataKinds, KindSignatures, TypeOperators, GADTs, TemplateHaskell, TypeFamilies, UndecidableInstances, Rank2Types, AllowAmbiguousTypes, ScopedTypeVariables #-}
-{-# OPTIONS_GHC -fplugin=TypeNatSolver #-}
+{-# OPTIONS_GHC -fplugin=GHC.TypeLits.Normalise #-}
 
 module NeuralNetwork2 where
 
 import qualified Data.Type.List as L
 import GHC.TypeLits
 import Data.Singletons
+import Data.Singletons.TH
 import Data.Promotion.TH
 import Data.Singletons.TypeLits
 import Data.Singletons.Prelude.Num
 import Data.Singletons.Prelude.List
 import Data.Array.IArray
 import Data.Graph.Inductive
+import Data.Type.Equality
 
 $(promoteOnly [d|
-                m :: Nat -> (Nat, (Nat, Nat)) -> (Nat, (Nat, Nat))
-                m n (x, y) = ((n+x), y)
+                 m :: Nat -> (Nat, (Nat, Nat)) -> (Nat, (Nat, Nat))
+                 m n (x, y) = ((n+x), y)
                 |])
+
+sM :: Sing a -> Sing b -> Sing (Apply (Apply MSym0 a) b)
+sM n (STuple2 x y) = STuple2 (n %:+ x) y
 
 type UnaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) = forall a w h w' h' . (IArray a e) => (a (Int, Int) e) -> (a (Int, Int) e)
 type BinaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) (w'' :: Nat) (h'' :: Nat) = forall a w h w' h' w'' h'' .(IArray a e) => (a (Int, Int) e) -> (a (Int, Int) e) -> (a (Int, Int) e)
@@ -106,6 +111,19 @@ toFGL' g (Binary nn i sw sh j sw' sh' f l) =
 toFGL :: DynGraph gr => NeuralNetwork n l -> gr String String
 toFGL = toFGL' empty
 
-addWeight :: SNat w -> SNat h -> NeuralNetwork n l -> NeuralNetwork (n+1) (Concat (l ': ('(n, '(w, h)) ': '[]) ': '[]))
-addWeight sw sh nn =
-    Union nn (Weight sw sh)
+concat_nil_last_identity :: Sing (l :: [(Nat, (Nat, Nat))]) -> Concat (l ': '[] ': '[]) :~: l
+concat_nil_last_identity SNil = Refl
+concat_nil_last_identity (SCons _ sl) = gcastWith (concat_nil_last_identity sl) Refl
+
+
+
+addWeight :: Sing (l :: [(Nat, (Nat, Nat))]) -> SNat w -> SNat h -> NeuralNetwork n l -> NeuralNetwork (n+1) ('(0, '(w, h)) ': (Map (MSym1 1) l))
+addWeight sl sw sh nn =
+    gcastWith (concat_nil_last_identity (sMap (singFun1 (Proxy :: Proxy (MSym1 1)) (sM (sing :: SNat 1))) sl)) $ Union (Weight sw sh) nn
+
+addWeightedEdge :: (L.Find '(i, '(a, b)) l ~ True) => SNat n -> Sing l -> SNat a -> SNat b -> SNat c -> SNat i -> NeuralNetwork n l -> NeuralNetwork (n+2) ('(n+1, '(a, c)) ': l)
+addWeightedEdge sn sl sa sb sc si nn =
+  let
+    nn' = addWeight sl sb sc nn
+  in
+    Close (Binary nn' (si %:+ (sing :: SNat 1)) sa sb (sn %:+ 1) sb sc prod "*") (sing :: SNat 1)
