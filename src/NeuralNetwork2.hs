@@ -1,5 +1,6 @@
-{-# LANGUAGE DataKinds, KindSignatures, TypeOperators, GADTs, TemplateHaskell, TypeFamilies, UndecidableInstances, Rank2Types, AllowAmbiguousTypes, ScopedTypeVariables #-}
+{-# LANGUAGE DataKinds, KindSignatures, TypeOperators, GADTs, TemplateHaskell, TypeFamilies, UndecidableInstances, Rank2Types, AllowAmbiguousTypes, ScopedTypeVariables, MultiParamTypeClasses, FlexibleInstances, FlexibleContexts #-}
 {-# OPTIONS_GHC -fplugin=GHC.TypeLits.Normalise #-}
+{-# OPTIONS_GHC -ddump-splices #-}
 
 module NeuralNetwork2 where
 
@@ -9,19 +10,18 @@ import Data.Singletons
 import Data.Singletons.TH
 import Data.Promotion.TH
 import Data.Singletons.TypeLits
+import Data.Singletons.Prelude.Eq
+import Data.Singletons.Prelude.Bool
 import Data.Singletons.Prelude.Num
+import Data.Singletons.Prelude.Maybe
 import Data.Singletons.Prelude.List
 import Data.Array.IArray
 import Data.Graph.Inductive
 import Data.Type.Equality
 
-$(promoteOnly [d|
-                 m :: Nat -> (Nat, (Nat, Nat)) -> (Nat, (Nat, Nat))
-                 m n (x, y) = ((n+x), y)
-                |])
-
-sM :: Sing a -> Sing b -> Sing (Apply (Apply MSym0 a) b)
-sM n (STuple2 x y) = STuple2 (n %:+ x) y
+data AtIndex (l :: [(Nat, Nat)]) (e :: (Nat, Nat)) (i :: Nat) where
+  Head :: AtIndex (x ': xs) x 0
+  Tail :: AtIndex t x i -> AtIndex (h ': t) x (i + 1)
 
 type UnaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) = forall a w h w' h' . (IArray a e) => (a (Int, Int) e) -> (a (Int, Int) e)
 type BinaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) (w'' :: Nat) (h'' :: Nat) = forall a w h w' h' w'' h'' .(IArray a e) => (a (Int, Int) e) -> (a (Int, Int) e) -> (a (Int, Int) e)
@@ -37,93 +37,78 @@ sgm x = 1 / (1 + exp (-x))
 sigm ::(Floating a) => UnaryFunction a w h w h
 sigm = amap sgm
 
-sum :: forall e w h . (Num e, KnownNat w, KnownNat h) => BinaryFunction e w h w h w h
-sum a1 a2 = listArray resultBounds (zipWith (+) (elems a1) (elems a2))
-  where sw = fromInteger $ natVal (sing :: SNat w)
-        sh = fromInteger $ natVal (sing :: SNat h)
+sum :: forall e w h . (Num e) => SNat w -> SNat h -> BinaryFunction e w h w h w h
+sum sw sh a1 a2 = listArray resultBounds (zipWith (+) (elems a1) (elems a2))
+  where iw = fromInteger $ withKnownNat sw $ natVal sw
+        ih = fromInteger $ withKnownNat sh $ natVal sh
         ((li , lj ), (ui , uj )) = bounds a1
         ((li', lj'), (ui', uj')) = bounds a2
         resultBounds
-          | (li, lj, ui, uj, li', lj', ui', uj') == (0, 0, sw-1, sh-1, 0, 0, sw-1, sh-1) = ((li, lj), (ui, uj))
+          | (li, lj, ui, uj, li', lj', ui', uj') == (0, 0, iw-1, ih-1, 0, 0, iw-1, ih-1) = ((li, lj), (ui, uj))
           | otherwise                                                                    = error "sum: invalid bounds"
 
-prod :: forall e a b c . (Num e, KnownNat a, KnownNat b, KnownNat c) => BinaryFunction e a b b c a c
-prod a1 a2 = array resultBounds [((i,j), Prelude.sum [a1!(i, k) * a2!(k, j)
+prod :: forall e a b c . (Num e) => SNat a -> SNat b -> SNat c -> BinaryFunction e a b b c a c
+prod sa sb sc a1 a2 = array resultBounds [((i,j), Prelude.sum [a1!(i, k) * a2!(k, j)
                                              | k <- range (lj, uj)])
                                 | i <- range (li , ui),
                                   j <- range (lj', uj')]
-  where sa = fromInteger $ natVal (sing :: SNat a)
-        sb = fromInteger $ natVal (sing :: SNat b)
-        sc = fromInteger $ natVal (sing :: SNat c)
+  where ia = fromInteger $ withKnownNat sa $ natVal sa
+        ib = fromInteger $ withKnownNat sb $ natVal sb
+        ic = fromInteger $ withKnownNat sc $ natVal sc
         ((li , lj ), (ui , uj))  = bounds a1
         ((li', lj'), (ui', uj')) = bounds a2
         resultBounds
-          | (li, lj, ui, uj, li', lj', ui', uj') == (0, 0, sa-1, sb-1, 0, 0, sb-1, sc-1) = ((li, lj'), (ui, uj'))
+          | (li, lj, ui, uj, li', lj', ui', uj') == (0, 0, ia-1, ib-1, 0, 0, ib-1, ic-1) = ((li, lj'), (ui, uj'))
           | otherwise                                                                    = error "prod: invalid bounds"
 
-data NeuralNetwork (n :: Nat) (l :: [(Nat, (Nat, Nat))]) where
-  Empty :: NeuralNetwork 0 '[]
-  Close :: NeuralNetwork n l -> SNat i -> NeuralNetwork n (L.Remove '(i, (L.Lookup i l)) l)
-  Unity :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
-  Weight :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
-  Input :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
-  PreviousState :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
-  PreviousOutput :: SNat w -> SNat h -> NeuralNetwork 1 ('(0, '(w, h)) ': '[])
-  State :: (L.Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> NeuralNetwork (n+1) l
-  Output :: (L.Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> NeuralNetwork (n+1) l
-  Union :: NeuralNetwork n1 l1 -> NeuralNetwork n2 l2 -> NeuralNetwork (n1 + n2) (Concat (l1 ': (Map (MSym1 n1) l2) ': '[]))
-  Unary :: (L.Find '(i, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> (forall a . UnaryFunction a w h w' h') -> String -> NeuralNetwork (n+1) ('(n, '(w, h)) ': l)
-  Binary :: (L.Find '(i, '(w, h)) l ~ True, L.Find '(j, '(w, h)) l ~ True) => NeuralNetwork n l -> SNat i -> SNat w -> SNat h -> SNat j -> SNat w' -> SNat h' -> (forall a . BinaryFunction a w h w' h' w'' h'') -> String -> NeuralNetwork (n+1) ('(n, '(w'', h'')) ': l)
+data NeuralNetwork a (l :: [(Nat, Nat)]) where
+  Empty :: NeuralNetwork a '[]
+  Unity :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[])
+  Weight :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[])
+  Input :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[])
+  PreviousState :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[])
+  PreviousOutput :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[])
+  State :: AtIndex l '(w, h) i -> NeuralNetwork a l -> SNat i -> NeuralNetwork a ('(w, h) ': l)
+  Output :: AtIndex l '(w, h) i -> NeuralNetwork a l -> SNat i -> NeuralNetwork a ('(w, h) ': l)
+  Union :: NeuralNetwork a l1 -> NeuralNetwork a l2 -> NeuralNetwork a (Concat (l1 ': l2 ': '[]))
+  Unary :: AtIndex l '(w, h) i -> NeuralNetwork a l -> SNat i -> UnaryFunction a w h w' h' -> String -> NeuralNetwork a ('(w, h) ': l)
+  Binary :: AtIndex l '(w, h) i -> AtIndex l '(w', h') j -> NeuralNetwork a l -> SNat i -> SNat j -> BinaryFunction a w h w' h' w'' h'' -> String -> NeuralNetwork a ('(w'', h'') ': l)
+  Concat :: AtIndex l '(w, h1) i -> AtIndex l '(w, h2) j -> NeuralNetwork a l -> SNat i -> SNat j -> NeuralNetwork a ('(w, h1+h2) ': l)
 
-val :: Sing (n :: Nat) -> Int
-val sn = fromInteger $ withKnownNat sn $ natVal sn
-
-toFGL' :: DynGraph gr => gr String String -> NeuralNetwork n l -> gr String String
-toFGL' g Empty = g
-toFGL' g (Close nn i) = toFGL' g nn
-toFGL' g (Unity w h) = ([], noNodes g, "U"++(show $ val w)++"x"++(show $ val h), []) & g
-toFGL' g (Weight w h) = ([], noNodes g, "W"++(show $ val w)++"x"++(show $ val h), []) & g
-toFGL' g (Input w h) = ([], noNodes g, "I"++(show $ val w)++"x"++(show $ val h), []) & g
-toFGL' g (PreviousState w h) = ([], noNodes g, "PS"++(show $ val w)++"x"++(show $ val h), []) & g
-toFGL' g (PreviousOutput w h) = ([], noNodes g, "PO"++(show $ val w)++"x"++(show $ val h), []) & g
-toFGL' g (State nn i w h) =
-  let
-    g' = toFGL' g  nn
-  in
-  ([((show $ val w)++"x"++(show $ val h), val i)], noNodes g', "S"++(show $ val w)++"x"++(show $ val h), []) & g'
-toFGL' g (Output nn i w h) =
-  let
-    g' = toFGL' g  nn
-  in
-  ([((show $ val w)++"x"++(show $ val h), val i)], noNodes g', "O"++(show $ val w)++"x"++(show $ val h), []) & g'
-toFGL' g (Union nn1 nn2) = toFGL' (toFGL' g nn1) nn2
-toFGL' g (Unary nn i sw sh f l) =
-  let
-    g' = toFGL' g  nn
-  in
-  ([((show $ val sw)++"x"++(show $ val sh), val i)], noNodes g', l, []) & g'
-toFGL' g (Binary nn i sw sh j sw' sh' f l) =
-  let
-    g' = toFGL' g  nn
-  in
-  ([((show $ val sw)++"x"++(show $ val sh), val i), ((show $ val sw')++"x"++(show $ val sh'), val j)], noNodes g', l, []) & g'
-
-toFGL :: DynGraph gr => NeuralNetwork n l -> gr String String
-toFGL = toFGL' empty
-
-concat_nil_last_identity :: Sing (l :: [(Nat, (Nat, Nat))]) -> Concat (l ': '[] ': '[]) :~: l
-concat_nil_last_identity SNil = Refl
-concat_nil_last_identity (SCons _ sl) = gcastWith (concat_nil_last_identity sl) Refl
+concat_with_nil :: Sing (l :: [(Nat, Nat)]) -> l :~: Concat (l ': ('[]) ': '[])
+concat_with_nil SNil = Refl
 
 
-
-addWeight :: Sing (l :: [(Nat, (Nat, Nat))]) -> SNat w -> SNat h -> NeuralNetwork n l -> NeuralNetwork (n+1) ('(0, '(w, h)) ': (Map (MSym1 1) l))
+addWeight :: Sing l -> SNat w -> SNat h -> NeuralNetwork a l -> (NeuralNetwork a ('(w, h) ': l), AtIndex ('(w, h) ': l) '(w, h) 0)
 addWeight sl sw sh nn =
-    gcastWith (concat_nil_last_identity (sMap (singFun1 (Proxy :: Proxy (MSym1 1)) (sM (sing :: SNat 1))) sl)) $ Union (Weight sw sh) nn
+    gcastWith (concat_with_nil sl) $ (Union (Weight sw sh) nn, Head)
 
-addWeightedEdge :: (L.Find '(i, '(a, b)) l ~ True) => SNat n -> Sing l -> SNat a -> SNat b -> SNat c -> SNat i -> NeuralNetwork n l -> NeuralNetwork (n+2) ('(n+1, '(a, c)) ': l)
-addWeightedEdge sn sl sa sb sc si nn =
+addWeightedEdge :: forall e l a b c i . (Num e) => AtIndex l '(a, b) i -> Sing l -> SNat a -> SNat b -> SNat c -> SNat i -> NeuralNetwork e l -> NeuralNetwork e ('(a, c) ': '(b, c) ': l)
+addWeightedEdge sp sl sa sb sc si nn =
   let
-    nn' = addWeight sl sb sc nn
+    (nn', sp') = addWeight sl sb sc nn
   in
-    Close (Binary nn' (si %:+ (sing :: SNat 1)) sa sb (sn %:+ 1) sb sc prod "*") (sing :: SNat 1)
+    Binary (Tail sp) sp' nn' (si %:+ (sing :: SNat 1)) (sing :: SNat 0) (prod sa sb sc) "*"
+
+addInducedLocalField :: forall e l a b c i . (Num e) => AtIndex l '(a, b) i -> Sing l -> SNat a -> SNat b -> SNat c -> SNat i -> NeuralNetwork e l -> NeuralNetwork e ('(a, c) ': '(b+1, c) ': '(a, b+1) ': '(a, 1) ': l)
+addInducedLocalField sp sl sa sb sc si nn =
+  let
+    s0 = sing :: SNat 0
+    s1 = sing :: SNat 1
+    nn' = Union (Unity sa s1) nn
+    sl' = SCons (STuple2 sa s1) sl
+    sp' = Tail sp
+    nn'' = Concat sp' Head (gcastWith (concat_with_nil sl) nn') (si %:+ s1) s0
+    sl'' = SCons (STuple2 sa (sb %:+ s1)) sl'
+  in
+    addWeightedEdge Head sl'' sa (sb %:+ s1) sc s0 nn''
+
+addNeuron :: forall e l i o x . (Num e) => UnaryFunction e 1 o 1 o -> String -> AtIndex l '(1, i) x -> Sing l -> SNat i -> SNat o -> SNat x -> NeuralNetwork e l -> NeuralNetwork e ('(1, o) ': '(1, o) ': '(i+1, o) ': '(1, i+1) ': '(1, 1) ': l)
+addNeuron sf sn sp sl si so sx nn =
+  let
+    s0 = sing :: SNat 0
+    s1 = sing :: SNat 1
+    nn' = addInducedLocalField sp sl s1 si so sx nn
+    sl' = SCons (STuple2 s1 so) $ SCons (STuple2 (si %:+ s1) so) $ SCons (STuple2 s1 (si %:+ s1)) $ SCons (STuple2 s1 s1) sl
+  in
+    Unary Head nn' s0 sf sn
