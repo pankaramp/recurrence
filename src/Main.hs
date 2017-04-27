@@ -16,7 +16,7 @@ main =
     s5 = sing :: SNat 5
     s6 = sing :: SNat 6
     s3 = sing :: SNat 3
-    nn = makeNetwork s5 (SCons s6 SNil) s3
+    nn = makeNetwork s5 (SCons s6 SNil) s3 :: SomeNeuralNetwork Double 5 3
   in
-    writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn :: Gr String String))
+    writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn :: Gr Label Label))
 
