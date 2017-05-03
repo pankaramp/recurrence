@@ -288,26 +288,45 @@ initD' _ _ _ SNil = []
 initD' 0 a b (SCons (STuple3 _ w h) sl) = generate (index2 (expVal w) (expVal h)) (\i -> let k = unindex2 i in cond (A.fst k A.== Prelude.fromIntegral a A.&& A.snd k A.== Prelude.fromIntegral b) (lift (ValueAndDerivative 1.1 1 :: ValueAndDerivative e)) (lift (ValueAndDerivative 1.1 0 :: ValueAndDerivative e))) : initD' (-1) a b sl
 initD' i a b (SCons (STuple3 _ w h) sl) = generate (index2 (expVal w) (expVal h)) (\_ -> 1.1) : initD' (i-1) a b sl
 
-eval' :: (A.Num e) => Sing l -> NeuralNetwork (ValueAndDerivative e) l -> [Acc (Matrix (ValueAndDerivative e))] -> [Acc (Matrix (ValueAndDerivative e))] -> [Acc (Matrix (ValueAndDerivative e))] -> [Acc (Matrix (ValueAndDerivative e))] -> [Acc (Matrix (ValueAndDerivative e))]
-eval' = eval
+listVal :: Sing (l :: [(NodeType, Nat, Nat)]) -> [(NodeType, Int, Int)]
+listVal SNil = []
+listVal (SCons (STuple3 st sw sh) sl) = (fromSing st, intVal sw, intVal sh):(listVal sl)
 
-eval :: (A.Num e) => Sing l -> NeuralNetwork e l -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)]
-eval sl (Unity w h) [] [] [] [] = [generate (index2 (expVal w) (expVal h)) (\_ -> 1)]
-eval sl (Weight w h) ww [] [] [] = ww
-eval sl (Input w h) [] ii [] [] = ii
-eval sl (PreviousState w h) [] [] ps [] = ps
-eval sl (PreviousOutput w h) [] [] [] po = po
-eval (SCons _ sl) (State _ nn i w h) ww ii ps po =
+eval :: (A.Num e) => Sing l -> NeuralNetwork e l -> [Acc (Matrix e)] -> [[Acc (Matrix e)]] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [([Acc (Matrix e)], [Acc (Matrix e)])]
+eval sl nn ww [] ps po = []
+eval sl nn ww (ih:it) ps po =
   let
-    t = eval sl nn ww ii ps po
+    r@(s, o) = eval'' sl nn ww ih ps po
+  in
+    r : eval sl nn ww it s o
+
+eval'' :: (A.Num e) => Sing l -> NeuralNetwork e l -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> ([Acc (Matrix e)], [Acc (Matrix e)])
+eval'' sl nn ww ii ps po =
+  let
+    li = Prelude.zip [1..] $ fromSing sl
+    s = Prelude.map Prelude.fst $ Prelude.filter (\(_, (t, _, _)) -> t Prelude.== S) li
+    o = Prelude.map Prelude.fst $ Prelude.filter (\(_, (t, _, _)) -> t Prelude.== O) li
+    r = eval' sl nn ww ii ps po
+  in
+    (Prelude.map (r Prelude.!!) s, Prelude.map (r Prelude.!!) o)
+
+eval' :: (A.Num e) => Sing l -> NeuralNetwork e l -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)]
+eval' sl (Unity w h) [] [] [] [] = [generate (index2 (expVal w) (expVal h)) (\_ -> 1)]
+eval' sl (Weight w h) ww [] [] [] = ww
+eval' sl (Input w h) [] ii [] [] = ii
+eval' sl (PreviousState w h) [] [] ps [] = ps
+eval' sl (PreviousOutput w h) [] [] [] po = po
+eval' (SCons _ sl) (State _ nn i w h) ww ii ps po =
+  let
+    t = eval' sl nn ww ii ps po
   in
     (t Prelude.!! (intVal i)) : t
-eval (SCons _ sl) (Output _ nn i w h) ww ii ps po =
+eval' (SCons _ sl) (Output _ nn i w h) ww ii ps po =
   let
-    t = eval sl nn ww ii ps po
+    t = eval' sl nn ww ii ps po
   in
     (t Prelude.!! (intVal i)) : t
-eval sl (Union nn1 sl1 nn2 sl2) ww ii ps po =
+eval' sl (Union nn1 sl1 nn2 sl2) ww ii ps po =
   let
     nww1 = intVal $ sLength $ sFilter (singFun1 (Proxy :: Proxy (MatchSym1 W)) (sMatch SW)) sl1
     nii1 = intVal $ sLength $ sFilter (singFun1 (Proxy :: Proxy (MatchSym1 I)) (sMatch SI)) sl1
@@ -317,18 +336,18 @@ eval sl (Union nn1 sl1 nn2 sl2) ww ii ps po =
     (ii1, ii2) = splitAt nii1 ii
     (ps1, ps2) = splitAt nps1 ps
     (po1, po2) = splitAt npo1 po
-    t1 = eval sl1 nn1 ww1 ii1 ps1 po1
-    t2 = eval sl2 nn2 ww2 ii2 ps2 po2
+    t1 = eval' sl1 nn1 ww1 ii1 ps1 po1
+    t2 = eval' sl2 nn2 ww2 ii2 ps2 po2
   in
     t1 Prelude.++ t2
-eval (SCons _ sl) (Unary _ nn i w h (f, l)) ww ii ps po =
+eval' (SCons _ sl) (Unary _ nn i w h (f, l)) ww ii ps po =
   let
-    t = eval sl nn ww ii ps po
+    t = eval' sl nn ww ii ps po
   in
     f (t Prelude.!! (intVal i)) : t
-eval (SCons _ sl) (Binary _ _ nn i w h j w' h' (f, l)) ww ii ps po =
+eval' (SCons _ sl) (Binary _ _ nn i w h j w' h' (f, l)) ww ii ps po =
   let
-    t = eval sl nn ww ii ps po
+    t = eval' sl nn ww ii ps po
   in
     f (t Prelude.!! (intVal i)) (t Prelude.!! (intVal j)) : t
 

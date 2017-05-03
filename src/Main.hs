@@ -24,10 +24,10 @@ main =
         let
           (w, i, ps, po) = NeuralNetwork2.initD 0 0 0 sl
         in
-          eval sl nn' w i ps po
+          eval sl nn' w [i] ps po
   in
     do
       writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn :: Gr Label Label))
-      print $ run $ prog !! 0
+      print $ run $ (fst (prog !! 0)) !! 0
 
 
