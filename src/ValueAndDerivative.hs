@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TypeFamilies, UndecidableInstances, MultiParamTypeClasses, FlexibleInstances, ConstraintKinds #-}
+{-# LANGUAGE ScopedTypeVariables, TypeFamilies, UndecidableInstances, MultiParamTypeClasses, FlexibleInstances, ConstraintKinds, FlexibleContexts #-}
 module ValueAndDerivative where
 
 import Prelude as P
@@ -12,6 +12,15 @@ type instance EltRepr (ValueAndDerivative e) = EltRepr (e, e)
 
 data ValueAndDerivative e = ValueAndDerivative e e
   deriving (Typeable, Show, P.Eq)
+
+derivative :: forall e . (Elt e) => Exp (ValueAndDerivative e) -> Exp e
+derivative e = let (ValueAndDerivative x (_ :: Exp e)) = unlift e in x
+
+value :: forall e . (Elt e) => Exp (ValueAndDerivative e) -> Exp e
+value e = let (ValueAndDerivative (_ :: Exp e) x) = unlift e in x
+
+fromValue :: (A.Num e) => Exp e -> Exp (ValueAndDerivative e)
+fromValue e = lift (ValueAndDerivative e 0)
 
 instance Elt e => Elt (ValueAndDerivative e) where
   eltType (_ :: ValueAndDerivative e) = eltType (undefined :: (e, e))
@@ -30,7 +39,7 @@ instance (Elt (Plain e), Lift Exp e) => Lift Exp (ValueAndDerivative e) where
       = Exp . Tuple
       $ NilTup `SnocTup` lift  a `SnocTup` lift b
 
-instance Elt a => Unlift Exp (ValueAndDerivative (Exp a)) where
+instance (Elt a) => Unlift Exp (ValueAndDerivative (Exp a)) where
   unlift e
     = let v     = Exp $ SuccTupIdx ZeroTupIdx `Prj` e
           d     = Exp $ ZeroTupIdx `Prj` e

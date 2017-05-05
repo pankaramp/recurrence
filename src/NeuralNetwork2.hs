@@ -287,11 +287,6 @@ init :: (Elt e, A.Floating e) => Exp e -> Sing (l :: [(Nat, Nat)]) -> PList l e
 init _ SNil = PNil
 init x (SCons (STuple2 w h) sl) = PCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> x)) (NeuralNetwork2.init x sl)
 
-initAlt :: (Elt e, A.Floating e, (i :>= 0) ~ True, (j :>= 0) ~ True, (i :< w) ~ True, (j :< h) ~ True) => Exp e -> Exp e -> SNat i -> SNat j -> AtIndex l '(w, h) ix -> Sing (l :: [(Nat, Nat)]) -> PList l e
-initAlt _ _ _ _ _ SNil = PNil
-initAlt x y si sj Head (SCons (STuple2 w h) sl) = PCons w h (generate (index2 (expVal w) (expVal h)) (\i -> let k = unindex2 i in cond (A.fst k A.== expVal si A.&& A.snd k A.== expVal sj) y x)) (NeuralNetwork2.init x sl)
-initAlt x y si sj (Tail p) (SCons (STuple2 w h) sl) = PCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> x)) (NeuralNetwork2.initAlt x y si sj p sl)
-
 flatten :: (Elt e) => PList l e -> Acc (Vector e)
 flatten PNil = A.use $ A.fromList (Z:.0) []
 flatten (PCons _ _ a pt) = (A.flatten a) A.++ (NeuralNetwork2.flatten pt)
@@ -356,6 +351,19 @@ eval' (SCons _ sl) (Binary p q nn i w h j w' h' (_, _, _, _, w'', h'', f,  l)) w
 data SomeNeuralNetwork e is os where
   SomeNeuralNetwork :: forall e l w i s o is os . (A.Floating e) => AtIndex l '(1, is) (Length l :- 1) -> AtIndex l '(1, os) 0 -> Sing l -> Sing w -> Sing i -> Sing s -> Sing o -> NeuralNetwork e l w i s o s o -> SomeNeuralNetwork e is os
 
+gradientParams :: (Exp e) -> (Exp e) -> Sing is -> Sing os -> SomeNeuralNetwork e is os -> [Acc (Vector e)]
+gradientParams x y sis sos nn =
+  case nn of
+    SomeNeuralNetwork q1 q2 _ sw si ss so nn' ->
+      let
+        sp = (sw %:++ ss %:++ so)
+        dp = fromSing sp
+        np = Prelude.map (index1 . lift) ([0..(fromInteger (foldl (\r (a, b) -> (r + a*b)) 0 dp)-1)] :: [Int])
+        p = NeuralNetwork2.flatten $ NeuralNetwork2.init x sp
+        mp = Prelude.map (\i -> A.imap (\j v -> cond (unindex1 j A.== unindex1 i) y v) p) np
+      in
+        mp
+        
 forwardParams :: (Exp e) -> Sing is -> Sing os -> SomeNeuralNetwork e is os -> Acc (Vector e)
 forwardParams x sis sos nn =
   case nn of
@@ -366,6 +374,22 @@ forwardParams x sis sos nn =
         po = NeuralNetwork2.init x so
       in
         NeuralNetwork2.flatten $ pJoin pw (pJoin ps po)
+
+gradient :: forall e is os . (Prelude.Num e, A.Num e, Lift Exp e, e ~ Plain e) => Sing is -> Sing os -> SomeNeuralNetwork (ValueAndDerivative e) is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector e)] -> Acc (Vector e)
+gradient sis sos nn f i =
+  let
+    g = gradient' sis sos nn f (Prelude.map (A.map (lift1 fromValue)) i)
+  in
+    A.map (lift1 derivative) g
+
+gradient' :: forall e is os . (Prelude.Num e, A.Elt e, Lift Exp e, e ~ Plain e) => Sing is -> Sing os -> SomeNeuralNetwork (ValueAndDerivative e) is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector (ValueAndDerivative e))] -> Acc (Vector (ValueAndDerivative e))
+gradient' sis sos nn f i =
+  let
+    gp = gradientParams (lift $ ValueAndDerivative (0 :: e) (0 :: e)) (lift $ ValueAndDerivative (0 :: e) (1 :: e)) sis sos nn
+    rs = Prelude.map (\p -> forward sis sos nn f p i) gp :: [Acc (Scalar (ValueAndDerivative e))]
+    ds = Prelude.map (reshape (index1 1)) rs
+  in
+    foldl (A.++) (A.use $ A.fromList (Z:.0) []) ds
 
 forward :: Sing is -> Sing os -> SomeNeuralNetwork e is os -> ([PList ('(1, os) ': '[]) e] -> Acc (Scalar e)) -> Acc (Vector e) -> [Acc (Vector e)] -> Acc (Scalar e)
 forward sis sos nn f p i =
