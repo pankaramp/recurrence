@@ -22,50 +22,60 @@ import Data.Typeable
 import Data.Array.Accelerate as A
 import ValueAndDerivative
 
-singletons [d|
-              data NodeType = W | I | S | O | PS | PO | Etc
-                deriving Prelude.Eq
-             |]
-
-singletonsOnly [d|
-                  match :: NodeType -> (NodeType, Nat, Nat) -> Bool
-                  match b (a, _, _) = b Prelude.== a
-                 |]
-
 data AtIndexNat (l :: [Nat]) (e :: Nat) (i :: Nat) where
   HeadNat :: AtIndexNat (x ': xs) x 0
   TailNat :: AtIndexNat t x i -> AtIndexNat (h ': t) x (i + 1)
 
-data AtIndex (l :: [(NodeType, Nat, Nat)]) (e :: (Nat, Nat)) (i :: Nat) where
-  Head :: AtIndex ('(t, w, h) ': xs) '(w, h) 0
+data AtIndex (l :: [(Nat, Nat)]) (e :: (Nat, Nat)) (i :: Nat) where
+  Head :: AtIndex ('(w, h) ': xs) '(w, h) 0
   Tail :: AtIndex t x i -> AtIndex (h ': t) x (i + 1)
 
 type Matrix e = Array DIM2 e
+
+data PList (l :: [(Nat, Nat)]) e where
+  PNil :: PList '[] e
+  PCons :: SNat w -> SNat h -> Acc (Matrix e) -> PList l e -> PList ('(w, h) ': l) e
+
+pAt :: AtIndex l '(w, h) i -> PList l e -> Acc (Matrix e)
+pAt Head (PCons _ _ a _) = a
+pAt (Tail p) (PCons _ _ _ l) = pAt p l
+
+pSplit :: Sing l -> Sing l' -> PList (l :++ l') e -> (PList l e, PList l' e)
+pSplit SNil sl' pl = (PNil, pl)
+pSplit (SCons _ sl) sl' (PCons w h a pl) =
+  let
+    (p1, p2) = pSplit sl sl' pl
+  in
+    (PCons w h a p1, p2)
+
+pJoin :: PList l e -> PList l' e -> PList (l :++ l') e
+pJoin PNil pl' = pl'
+pJoin (PCons w h a pl) pl' = PCons w h a (pJoin pl pl')
 
 newtype Label = Label String
 instance Show Label where
   show (Label s) = s
 
-type UnaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) = (Elt e) => (Acc (Matrix e) -> Acc (Matrix e), Label)
-type BinaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) (w'' :: Nat) (h'' :: Nat) = (Elt e) => (Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e), Label)
+type UnaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) = (Elt e) => (SNat w, SNat h, SNat w', SNat h', Acc (Matrix e) -> Acc (Matrix e), Label)
+type BinaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) (w'' :: Nat) (h'' :: Nat) = (Elt e) => (SNat w, SNat h, SNat w', SNat h', SNat w'', SNat h'', Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e), Label)
 
 tnh :: (A.Floating a, Elt a) => Exp a -> Exp a
 tnh x = ((exp x) - (exp (-x))) / ((exp x) + (exp (-x)))
 
-tanh ::(A.Floating a) => UnaryFunction a w h w h
-tanh = (A.map tnh, Label "tanh")
+tanh ::(A.Floating a) => SNat w -> SNat h -> UnaryFunction a w h w h
+tanh sw sh = (sw, sh, sw, sh, A.map tnh, Label "tanh")
 
 sgm :: (A.Floating a, Elt a) => Exp a -> Exp a
 sgm x = 1 / (1 + exp (-x))
 
-sigm ::(A.Floating a) => UnaryFunction a w h w h
-sigm = (A.map sgm, Label "sigm")
+sigm ::(A.Floating a) => SNat w -> SNat h -> UnaryFunction a w h w h
+sigm sw sh = (sw, sh, sw, sh, A.map sgm, Label "sigm")
 
 esum :: (A.Num e) => SNat w -> SNat h -> BinaryFunction e w h w h w h
-esum _ _ = (A.zipWith (+), Label ".+")
+esum sw sh = (sw, sh, sw, sh, sw, sh, A.zipWith (+), Label ".+")
 
 eprod :: (A.Num e) => SNat w -> SNat h -> BinaryFunction e w h w h w h
-eprod _ _ = (A.zipWith (*), Label ".*")
+eprod sw sh = (sw, sh, sw, sh, sw, sh, A.zipWith (*), Label ".*")
 
 prd :: (A.Num e, Elt e) => Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e)
 prd a b = A.fold (+) 0 $ A.zipWith (*) aRepl bRepl
@@ -76,63 +86,63 @@ prd a b = A.fold (+) 0 $ A.zipWith (*) aRepl bRepl
     bRepl = A.replicate (lift $ Z :. rowsA :. All   :. All) (A.transpose b)
 
 prod :: (A.Num e, Elt e) => SNat a -> SNat b -> SNat c -> BinaryFunction e a b b c a c
-prod _ _ _= (prd, Label "*")
+prod sa sb sc = (sa, sb, sb, sc, sa, sc, prd, Label "*")
 
 concat :: forall e a b c . SNat a -> SNat b -> SNat c -> BinaryFunction e a b a c a (b+c)
-concat sa sb sc = ((A.++), Label "++")
+concat sa sb sc = (sa, sb, sa, sc, sa, sb %:+ sc, (A.++), Label "++")
 
-data NeuralNetwork a (l :: [(NodeType, Nat, Nat)]) where
-  Empty :: NeuralNetwork a '[]
-  Unity :: SNat w -> SNat h -> NeuralNetwork a ('(Etc, w, h) ': '[])
-  Weight :: SNat w -> SNat h -> NeuralNetwork a ('(W, w, h) ': '[])
-  Input :: SNat w -> SNat h -> NeuralNetwork a ('(I, w, h) ': '[])
-  PreviousState :: SNat w -> SNat h -> NeuralNetwork a ('(PS, w, h) ': '[])
-  PreviousOutput :: SNat w -> SNat h -> NeuralNetwork a ('(PO, w, h) ': '[])
-  State :: AtIndex l '(w, h) i -> NeuralNetwork a l -> SNat i -> SNat w -> SNat h -> NeuralNetwork a ('(S, w, h) ': l)
-  Output :: AtIndex l '(w, h) i -> NeuralNetwork a l -> SNat i -> SNat w -> SNat h -> NeuralNetwork a ('(O, w, h) ': l)
-  Union :: NeuralNetwork a l1 -> Sing l1 -> NeuralNetwork a l2 -> Sing l2 -> NeuralNetwork a (Concat (l1 ': l2 ': '[]))
-  Unary :: (Elt a) => AtIndex l '(w, h) i -> NeuralNetwork a l -> SNat i -> SNat w -> SNat h -> UnaryFunction a w h w' h' -> NeuralNetwork a ('(Etc, w, h) ': l)
-  Binary :: (Elt a) => AtIndex l '(w, h) i -> AtIndex l '(w', h') j -> NeuralNetwork a l -> SNat i -> SNat w -> SNat h -> SNat j -> SNat w' -> SNat h' -> BinaryFunction a w h w' h' w'' h'' -> NeuralNetwork a ('(Etc, w'', h'') ': l)
+data NeuralNetwork a (l :: [(Nat, Nat)]) (w :: [(Nat, Nat)]) (i :: [(Nat, Nat)]) (ps :: [(Nat, Nat)]) (po :: [(Nat, Nat)]) (s :: [(Nat, Nat)]) (o :: [(Nat, Nat)]) where
+  Empty :: NeuralNetwork a '[] '[] '[] '[] '[] '[] '[]
+  Unity :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[]) '[] '[] '[] '[] '[] '[]
+  Weight :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[]) ('(w, h) ': '[]) '[] '[] '[] '[] '[]
+  Input :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[]) '[] ('(w, h) ': '[]) '[] '[] '[] '[]
+  PreviousState :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[]) '[] '[] ('(w, h) ': '[]) '[] '[] '[]
+  PreviousOutput :: SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': '[]) '[] '[] '[] ('(w, h) ': '[]) '[] '[]
+  State :: AtIndex l '(w, h) i -> NeuralNetwork a l ww ii ps po s o -> SNat i -> SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': l) ww ii ps po ('(w, h) ': s) o
+  Output :: AtIndex l '(w, h) i -> NeuralNetwork a l ww ii ps po s o -> SNat i -> SNat w -> SNat h -> NeuralNetwork a ('(w, h) ': l) ww ii ps po s ('(w, h) ': o)
+  Union :: NeuralNetwork a l1 w1 i1 ps1 po1 s1 o1 -> Sing l1 -> Sing w1 -> Sing i1 -> Sing ps1 -> Sing po1 -> Sing s1 -> Sing o1 -> NeuralNetwork a l2 w2 i2 ps2 po2 s2 o2 -> Sing l2 -> Sing w2 -> Sing i2 -> Sing ps2 -> Sing po2 -> Sing s2 -> Sing o2 -> NeuralNetwork a (l1 :++ l2) (w1 :++ w2) (i1 :++ i2) (ps1 :++ ps2) (po1 :++ po2) (s1 :++ s2) (o1 :++ o2)
+  Unary :: (Elt a) => AtIndex l '(w, h) i -> NeuralNetwork a l ww ii ps po s o -> SNat i -> SNat w -> SNat h -> UnaryFunction a w h w' h' -> NeuralNetwork a ('(w', h') ': l) ww ii ps po s o
+  Binary :: (Elt a) => AtIndex l '(w, h) i -> AtIndex l '(w', h') j -> NeuralNetwork a l ww ii ps po s o -> SNat i -> SNat w -> SNat h -> SNat j -> SNat w' -> SNat h' -> BinaryFunction a w h w' h' w'' h'' -> NeuralNetwork a ('(w'', h'') ': l) ww ii ps po s o
 
-concat_with_nil :: Sing (l :: [(NodeType, Nat, Nat)]) -> l :~: Concat (l ': '[] ': '[])
+concat_with_nil :: Sing (l :: [(Nat, Nat)]) -> l :~: Concat (l ': '[] ': '[])
 concat_with_nil SNil = Refl
 concat_with_nil (SCons _ sl) = gcastWith (concat_with_nil sl) Refl
 
-addWeight :: Sing l -> SNat w -> SNat h -> NeuralNetwork a l -> (NeuralNetwork a ('(W, w, h) ': l), AtIndex ('(W, w, h) ': l) '(w, h) 0)
-addWeight sl sw sh nn =
-    gcastWith (concat_with_nil sl) $ (Union (Weight sw sh) (SCons (STuple3 SW sw sh) SNil) nn sl, Head)
+addWeight :: Sing l -> Sing ww -> Sing i -> Sing ps -> Sing po -> Sing s -> Sing o -> SNat w -> SNat h -> NeuralNetwork a l ww i ps po s o -> NeuralNetwork a ('(w, h) ': l) ('(w, h) ': ww) i ps po s o
+addWeight sl sww si sps spo ss so sw sh nn =
+    Union (Weight sw sh) (SCons (STuple2 sw sh) SNil) (SCons (STuple2 sw sh) SNil) SNil SNil SNil SNil SNil nn sl sww si sps spo ss so
 
-addWeightedEdge :: (A.Num e, Elt e) => AtIndex l '(a, b) i -> Sing l -> SNat a -> SNat b -> SNat c -> SNat i -> NeuralNetwork e l -> NeuralNetwork e ('(Etc, a, c) ': '(W, b, c) ': l)
-addWeightedEdge sp sl sa sb sc si nn =
+addWeightedEdge :: (A.Num e, Elt e) => AtIndex l '(a, b) i -> Sing l -> Sing w -> Sing ii -> Sing ps -> Sing po -> Sing s -> Sing o -> SNat a -> SNat b -> SNat c -> SNat i -> NeuralNetwork e l w ii ps po s o -> NeuralNetwork e ('(a, c) ': '(b, c) ': l) ('(b, c) ': w) ii ps po s o
+addWeightedEdge sp sl sw sii sps spo ss so sa sb sc si nn =
   let
-    (nn', sp') = addWeight sl sb sc nn
+    (nn', sp') = (addWeight sl sw sii sps spo ss so sb sc nn, Head)
   in
     Binary (Tail sp) sp' nn' (si %:+ (sing :: SNat 1)) sa sb (sing :: SNat 0) sb sc (prod sa sb sc)
 
-addInducedLocalField :: (A.Num e, Elt e) => AtIndex l '(a, b) i -> Sing l -> SNat a -> SNat b -> SNat c -> SNat i -> NeuralNetwork e l -> NeuralNetwork e ('(Etc, a, c) ': '(W, b+1, c) ': '(Etc, a, b+1) ': '(Etc, a, 1) ': l)
-addInducedLocalField sp sl sa sb sc si nn =
+addInducedLocalField :: (A.Num e, Elt e) => AtIndex l '(a, b) i -> Sing l -> Sing w -> Sing ii -> Sing ps -> Sing po -> Sing s -> Sing o -> SNat a -> SNat b -> SNat c -> SNat i -> NeuralNetwork e l w ii ps po s o -> NeuralNetwork e ('(a, c) ': '(b+1, c) ': '(a, b+1) ': '(a, 1) ': l) ('(b+1, c) ': w) ii ps po s o
+addInducedLocalField sp sl sw sii sps spo ss so sa sb sc si nn =
   let
     s0 = sing :: SNat 0
     s1 = sing :: SNat 1
-    nn' = Union (Unity sa s1) (SCons (STuple3 SEtc sa s1) SNil) nn sl
-    sl' = SCons (STuple3 SEtc sa s1) sl
+    nn' = Union (Unity sa s1) (SCons (STuple2 sa s1) SNil) SNil SNil SNil SNil SNil SNil nn sl sw sii sps spo ss so
+    sl' = SCons (STuple2 sa s1) sl
     sp' = Tail sp
-    nn'' = Binary sp' Head (gcastWith (concat_with_nil sl) nn') (si %:+ s1) sa sb s0 sa s1 (NeuralNetwork2.concat sa sb s1)
-    sl'' = SCons (STuple3 SEtc sa (sb %:+ s1)) sl'
+    nn'' = Binary sp' Head nn' (si %:+ s1) sa sb s0 sa s1 (NeuralNetwork2.concat sa sb s1)
+    sl'' = SCons (STuple2 sa (sb %:+ s1)) sl'
   in
-    addWeightedEdge Head sl'' sa (sb %:+ s1) sc s0 nn''
+    addWeightedEdge Head sl'' sw sii sps spo ss so sa (sb %:+ s1) sc s0 nn''
 
-addNeuron :: (A.Num e, Elt e) => UnaryFunction e 1 o 1 o -> AtIndex l '(1, i) x -> Sing l -> SNat i -> SNat o -> SNat x -> NeuralNetwork e l -> NeuralNetwork e ('(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+1, o) ': '(Etc, 1, i+1) ': '(Etc, 1, 1) ': l)
-addNeuron sf sp sl si so sx nn =
+addNeuron :: (A.Num e, Elt e) => UnaryFunction e 1 o 1 o -> AtIndex l '(1, i) x -> Sing l -> Sing w -> Sing ii -> Sing ps -> Sing po -> Sing s -> Sing oo -> SNat i -> SNat o -> SNat x -> NeuralNetwork e l w ii ps po s oo -> NeuralNetwork e ('(1, o) ': '(1, o) ': '(i+1, o) ': '(1, i+1) ': '(1, 1) ': l) ('(i+1, o) ': w) ii ps po s oo
+addNeuron sf sp sl sw sii sps spo ss soo si so sx nn =
   let
     s0 = sing :: SNat 0
     s1 = sing :: SNat 1
-    nn' = addInducedLocalField sp sl s1 si so sx nn
+    nn' = addInducedLocalField sp sl sw sii sps spo ss soo s1 si so sx nn
   in
     Unary Head nn' s0 s1 so sf
   
-addLSTMLayer :: forall e i o l x . (A.Floating e, Elt e) => AtIndex l '(1, i) x -> Sing l -> SNat i -> SNat o -> SNat x -> NeuralNetwork e l -> (NeuralNetwork e ('(O, 1, o) ': '(S, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(PS, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+o+1, o) ': '(Etc, 1, i+o+1) ': '(Etc, 1, 1) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+o+1, o) ': '(Etc, 1, i+o+1) ': '(Etc, 1, 1) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+o+1, o) ': '(Etc, 1, i+o+1) ': '(Etc, 1, 1) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+o+1, o) ': '(Etc, 1, i+o+1) ': '(Etc, 1, 1) ': '(Etc, 1, i+o) ': '(PO, 1, o) ': l), Sing ('(O, 1, o) ': '(S, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(PS, 1, o) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+o+1, o) ': '(Etc, 1, i+o+1) ': '(Etc, 1, 1) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+o+1, o) ': '(Etc, 1, i+o+1) ': '(Etc, 1, 1) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+o+1, o) ': '(Etc, 1, i+o+1) ': '(Etc, 1, 1) ': '(Etc, 1, o) ': '(Etc, 1, o) ': '(W, i+o+1, o) ': '(Etc, 1, i+o+1) ': '(Etc, 1, 1) ': '(Etc, 1, i+o) ': '(PO, 1, o) ': l))
-addLSTMLayer sp sl si so sx nn =
+addLSTMLayer :: forall e i o l x w ii ps po s oo . (A.Floating e, Elt e) => AtIndex l '(1, i) x -> Sing l -> Sing w -> Sing ii -> Sing ps -> Sing po -> Sing s -> Sing oo -> SNat i -> SNat o -> SNat x -> NeuralNetwork e l w ii ps po s oo -> (NeuralNetwork e ('(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(i+o+1, o) ': '(1, i+o+1) ': '(1, 1) ': '(1, o) ': '(1, o) ': '(i+o+1, o) ': '(1, i+o+1) ': '(1, 1) ': '(1, o) ': '(1, o) ': '(i+o+1, o) ': '(1, i+o+1) ': '(1, 1) ': '(1, o) ': '(1, o) ': '(i+o+1, o) ': '(1, i+o+1) ': '(1, 1) ': '(1, i+o) ': '(1, o) ': l) ('(i+o+1, o) ': '(i+o+1, o) ': '(i+o+1, o) ': '(i+o+1, o) ': w) ii ('(1, o) ': ps) ('(1, o) ': po) ('(1, o) ': s) ('(1, o) ': oo), Sing ('(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(1, o) ': '(i+o+1, o) ': '(1, i+o+1) ': '(1, 1) ': '(1, o) ': '(1, o) ': '(i+o+1, o) ': '(1, i+o+1) ': '(1, 1) ': '(1, o) ': '(1, o) ': '(i+o+1, o) ': '(1, i+o+1) ': '(1, 1) ': '(1, o) ': '(1, o) ': '(i+o+1, o) ': '(1, i+o+1) ': '(1, 1) ': '(1, i+o) ': '(1, o) ': l), Sing ('(i+o+1, o) ': '(i+o+1, o) ': '(i+o+1, o) ': '(i+o+1, o) ': w), Sing ii, Sing ('(1, o) ': ps), Sing ('(1, o) ': po), Sing ('(1, o) ': s), Sing ('(1, o) ': oo))
+addLSTMLayer sp sl sw sii spstate spoutput ss soo si so sx nn =
   let
     s0 = sing :: SNat 0
     s1 = sing :: SNat 1
@@ -142,38 +152,44 @@ addLSTMLayer sp sl si so sx nn =
     s5 = sing :: SNat 5
     sio = si %:+ so
 
-    nn' = gcastWith (concat_with_nil sl) $ Union (PreviousOutput s1 so) (SCons (STuple3 SPO s1 so) SNil) nn sl :: NeuralNetwork e ('(PO, 1, o) ': l)
-    sl' = SCons (STuple3 SPO s1 so) sl
+    nn' = Union (PreviousOutput s1 so) (SCons (STuple2 s1 so) SNil) SNil SNil SNil (SCons (STuple2 s1 so) SNil) SNil SNil nn sl sw sii spstate spoutput ss soo
+    sl' = SCons (STuple2 s1 so) sl
+    spoutput' = SCons (STuple2 s1 so) spoutput
     sx' = sx %:+ s1
     sp' = Tail sp
     
-    nn'' = Binary sp' Head nn'  sx' s1 si s0 s1 so (NeuralNetwork2.concat s1 si so)
-    sl'' = SCons (STuple3 SEtc s1 sio) sl'
+    nn'' = Binary sp' Head nn' sx' s1 si s0 s1 so (NeuralNetwork2.concat s1 si so)
+    sl'' = SCons (STuple2 s1 sio) sl'
     sx'' = s0
     sp'' = Head
 
-    nn''' = addNeuron sigm sp'' sl'' sio so sx'' nn''
-    sl''' = SCons (STuple3 SEtc s1 so) $ SCons (STuple3 SEtc s1 so) $ SCons (STuple3 SW (sio %:+ s1) so) $ SCons (STuple3 SEtc s1 (sio %:+ s1)) $ SCons (STuple3 SEtc s1 s1) sl''
+    nn''' = addNeuron (sigm s1 so) sp'' sl'' sw sii spstate spoutput' ss soo sio so sx'' nn''
+    sl''' = SCons (STuple2 s1 so) $ SCons (STuple2 s1 so) $ SCons (STuple2 (sio %:+ s1) so) $ SCons (STuple2 s1 (sio %:+ s1)) $ SCons (STuple2 s1 s1) sl''
+    sw' = SCons (STuple2 (sio %:+ s1) so) sw
     sx''' = sx'' %:+ s5
     sp''' = Tail $ Tail $ Tail $ Tail $ Tail sp''
 
-    nn'''' = addNeuron sigm sp''' sl''' sio so sx''' nn'''
-    sl'''' = SCons (STuple3 SEtc s1 so) $ SCons (STuple3 SEtc s1 so) $ SCons (STuple3 SW (sio %:+ s1) so) $ SCons (STuple3 SEtc s1 (sio %:+ s1)) $ SCons (STuple3 SEtc s1 s1) sl'''
+    nn'''' = addNeuron (sigm s1 so) sp''' sl''' sw' sii spstate spoutput' ss soo sio so sx''' nn'''
+    sl'''' = SCons (STuple2 s1 so) $ SCons (STuple2 s1 so) $ SCons (STuple2 (sio %:+ s1) so) $ SCons (STuple2 s1 (sio %:+ s1)) $ SCons (STuple2 s1 s1) sl'''
+    sw'' = SCons (STuple2 (sio %:+ s1) so) sw'
     sx'''' = sx''' %:+ s5
     sp'''' = Tail $ Tail $ Tail $ Tail $ Tail sp'''
 
-    nn''''' = addNeuron sigm sp'''' sl'''' sio so sx'''' nn''''
-    sl''''' = SCons (STuple3 SEtc s1 so) $ SCons (STuple3 SEtc s1 so) $ SCons (STuple3 SW (sio %:+ s1) so) $ SCons (STuple3 SEtc s1 (sio %:+ s1)) $ SCons (STuple3 SEtc  s1 s1) sl''''
+    nn''''' = addNeuron (sigm s1 so) sp'''' sl'''' sw'' sii spstate spoutput' ss soo sio so sx'''' nn''''
+    sl''''' = SCons (STuple2 s1 so) $ SCons (STuple2 s1 so) $ SCons (STuple2 (sio %:+ s1) so) $ SCons (STuple2 s1 (sio %:+ s1)) $ SCons (STuple2 s1 s1) sl''''
+    sw''' = SCons (STuple2 (sio %:+ s1) so) sw''
     sx''''' = sx'''' %:+ s5
     sp''''' = Tail $ Tail $ Tail $ Tail $ Tail sp''''
 
-    nn'''''' = addNeuron NeuralNetwork2.tanh sp''''' sl''''' sio so sx''''' nn'''''
-    sl'''''' = SCons (STuple3 SEtc s1 so) $ SCons (STuple3 SEtc s1 so) $ SCons (STuple3 SW (sio %:+ s1) so) $ SCons (STuple3 SEtc s1 (sio %:+ s1)) $ SCons (STuple3 SEtc s1 s1) sl'''''
+    nn'''''' = addNeuron (NeuralNetwork2.tanh s1 so) sp''''' sl''''' sw''' sii spstate spoutput' ss soo sio so sx''''' nn'''''
+    sl'''''' = SCons (STuple2 s1 so) $ SCons (STuple2 s1 so) $ SCons (STuple2 (sio %:+ s1) so) $ SCons (STuple2 s1 (sio %:+ s1)) $ SCons (STuple2 s1 s1) sl'''''
+    sw'''' = SCons (STuple2 (sio %:+ s1) so) sw'''
     sx'''''' = sx''''' %:+ s5
     sp'''''' = Tail $ Tail $ Tail $ Tail $ Tail sp'''''
 
-    nn''''''' = gcastWith (concat_with_nil sl) $ Union (PreviousState s1 so) (SCons (STuple3 SPS s1 so) SNil) nn'''''' sl''''''
-    sl''''''' = SCons (STuple3 SPS s1 so) sl''''''
+    nn''''''' =  Union (PreviousState s1 so) (SCons (STuple2 s1 so) SNil) SNil SNil (SCons (STuple2 s1 so) SNil) SNil SNil SNil nn'''''' sl'''''' sw'''' sii spstate spoutput' ss soo
+    sl''''''' = SCons (STuple2 s1 so) sl''''''
+    spstate' = SCons (STuple2 s1 so) spstate
 
     spst = s0
     sc  = s1
@@ -187,32 +203,40 @@ addLSTMLayer sp sl si so sx nn =
     spf = Tail $ Tail $ Tail $ Tail $ Tail spi
 
     nn'''''''' = Binary spf sps nn'''''''  sf s1 so spst s1 so (eprod s1 so)
-    sl'''''''' = SCons (STuple3 SEtc s1 so) $ sl'''''''
+    sl'''''''' = SCons (STuple2 s1 so) $ sl'''''''
 
     nn''''''''' = Binary (Tail spi) (Tail spc) nn''''''''  (s1 %:+ sin) s1 so (s1 %:+ sc) s1 so (eprod s1 so)
-    sl''''''''' = SCons (STuple3 SEtc s1 so) $ sl''''''''
+    sl''''''''' = SCons (STuple2 s1 so) $ sl''''''''
 
     nn'''''''''' = Binary Head (Tail Head) nn'''''''''  s0 s1 so s1 s1 so (esum s1 so)
-    sl'''''''''' = SCons (STuple3 SEtc s1 so) $ sl'''''''''
+    sl'''''''''' = SCons (STuple2 s1 so) $ sl'''''''''
 
     snst = s0
     spns = Head
 
-    nn''''''''''' = Unary Head nn''''''''''  s0 s1 so NeuralNetwork2.tanh
-    sl''''''''''' = SCons (STuple3 SEtc s1 so) $ sl''''''''''
+    nn''''''''''' = Unary Head nn''''''''''  s0 s1 so (NeuralNetwork2.tanh s1 so)
+    sl''''''''''' = SCons (STuple2 s1 so) $ sl''''''''''
 
     nn'''''''''''' = Binary Head (Tail $ Tail $ Tail $ Tail spo) nn'''''''''''  s0 s1 so (s4 %:+ sou) s1 so (eprod s1 so)
-    sl'''''''''''' = SCons (STuple3 SEtc s1 so) $ sl'''''''''''
+    sl'''''''''''' = SCons (STuple2 s1 so) $ sl'''''''''''
     
     nn''''''''''''' = State (Tail $ Tail Head) nn'''''''''''' (s2 %:+ snst) s1 so
-    sl''''''''''''' = SCons (STuple3 SS s1 so) $ sl''''''''''''
+    sl''''''''''''' = SCons (STuple2 s1 so) $ sl''''''''''''
+    ss' = SCons (STuple2 s1 so) $ ss
 
     nn'''''''''''''' = Output (Tail Head) nn''''''''''''' s1 s1 so
-    sl'''''''''''''' = SCons (STuple3 SO s1 so) $ sl'''''''''''''
+    sl'''''''''''''' = SCons (STuple2 s1 so) $ sl'''''''''''''
+    soo' = SCons (STuple2 s1 so) $ soo
   in
     (
       nn'''''''''''''',
-      sl''''''''''''''
+      sl'''''''''''''',
+      sw'''',
+      sii,
+      spstate',
+      spoutput',
+      ss',
+      soo'
     )
 
 showVal :: Sing (n :: Nat) -> String
@@ -221,7 +245,7 @@ showVal sn = show $ fromInteger $ withKnownNat sn $ natVal sn
 val :: Graph gr => Sing (n :: Nat) -> gr a b -> Int
 val sn g = noNodes g - 1 - (fromInteger $ withKnownNat sn $ natVal sn)
 
-toFGL' :: DynGraph gr => gr Label Label -> NeuralNetwork e l -> gr Label Label
+toFGL' :: DynGraph gr => gr Label Label -> NeuralNetwork e l w i ps po s o -> gr Label Label
 toFGL' g Empty = g
 toFGL' g (Unity w h) = ([], noNodes g, Label ("U:"Prelude.++(showVal w)Prelude.++"x"Prelude.++(showVal h)), []) & g
 toFGL' g (Weight w h) = ([], noNodes g, Label ("W:"Prelude.++(showVal w)Prelude.++"x"Prelude.++(showVal h)), []) & g
@@ -238,19 +262,19 @@ toFGL' g (Output _ nn i w h) =
     g' = toFGL' g  nn
   in
   ([(Label((showVal w)Prelude.++"x"Prelude.++(showVal h)), val i g')], noNodes g', Label("O"Prelude.++(showVal w)Prelude.++"x"Prelude.++(showVal h)), []) & g'
-toFGL' g (Union nn1 _ nn2 _) = toFGL' (toFGL' g nn2) nn1
-toFGL' g (Unary _ nn i sw sh (f, l)) =
+toFGL' g (Union nn1 _ _ _ _ _ _ _ nn2 _ _ _ _ _ _ _) = toFGL' (toFGL' g nn2) nn1
+toFGL' g (Unary _ nn i sw sh (_, _, _, _, f, l)) =
   let
     g' = toFGL' g  nn
   in
   ([(Label((showVal sw)Prelude.++"x"Prelude.++(showVal sh)), val i g')], noNodes g', l, []) & g'
-toFGL' g (Binary _ _ nn i sw sh j sw' sh' (f, l)) =
+toFGL' g (Binary _ _ nn i sw sh j sw' sh' (_, _, _, _, _, _, f, l)) =
   let
     g' = toFGL' g  nn
   in
   ([(Label((showVal sw)Prelude.++"x"Prelude.++(showVal sh)), val i g'), (Label((showVal sw')Prelude.++"x"Prelude.++(showVal sh')), val j g')], noNodes g', l, []) & g'
 
-toFGL'' :: DynGraph gr => NeuralNetwork e l -> gr Label Label
+toFGL'' :: DynGraph gr => NeuralNetwork e l w i ps po s o -> gr Label Label
 toFGL'' = toFGL' empty
 
 expVal :: Sing (n :: Nat) -> Exp Int
@@ -259,104 +283,105 @@ expVal sn = fromInteger $ withKnownNat sn $ natVal sn
 intVal :: Sing (n :: Nat) -> Int
 intVal sn = fromInteger $ withKnownNat sn $ natVal sn
 
-init' :: (Elt e, A.Floating e) => Sing (l :: [(NodeType, Nat, Nat)]) -> [Acc (Matrix e)]
-init' SNil = []
-init' (SCons (STuple3 _ w h) sl) = generate (index2 (expVal w) (expVal h)) (\_ -> 1.1) : init' sl
+init :: (Elt e, A.Floating e) => Exp e -> Sing (l :: [(Nat, Nat)]) -> PList l e
+init _ SNil = PNil
+init x (SCons (STuple2 w h) sl) = PCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> x)) (NeuralNetwork2.init x sl)
 
-init :: (Elt e, A.Floating e) => Sing (l :: [(NodeType, Nat, Nat)]) -> ([Acc (Matrix e)], [Acc (Matrix e)], [Acc (Matrix e)], [Acc (Matrix e)])
-init sl =
+initAlt :: (Elt e, A.Floating e, (i :>= 0) ~ True, (j :>= 0) ~ True, (i :< w) ~ True, (j :< h) ~ True) => Exp e -> Exp e -> SNat i -> SNat j -> AtIndex l '(w, h) ix -> Sing (l :: [(Nat, Nat)]) -> PList l e
+initAlt _ _ _ _ _ SNil = PNil
+initAlt x y si sj Head (SCons (STuple2 w h) sl) = PCons w h (generate (index2 (expVal w) (expVal h)) (\i -> let k = unindex2 i in cond (A.fst k A.== expVal si A.&& A.snd k A.== expVal sj) y x)) (NeuralNetwork2.init x sl)
+initAlt x y si sj (Tail p) (SCons (STuple2 w h) sl) = PCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> x)) (NeuralNetwork2.initAlt x y si sj p sl)
+
+flatten :: (Elt e) => PList l e -> Acc (Vector e)
+flatten PNil = A.use $ A.fromList (Z:.0) []
+flatten (PCons _ _ a pt) = (A.flatten a) A.++ (NeuralNetwork2.flatten pt)
+
+unflatten :: (Elt e) => Sing l -> Acc (Vector e) -> PList l e
+unflatten SNil a = PNil
+unflatten (SCons (STuple2 sw sh) sl) a =
   let
-    sww = sFilter (singFun1 (Proxy :: Proxy (MatchSym1 W)) (sMatch SW)) sl
-    sii = sFilter (singFun1 (Proxy :: Proxy (MatchSym1 I)) (sMatch SI)) sl
-    sps = sFilter (singFun1 (Proxy :: Proxy (MatchSym1 PS)) (sMatch SPS)) sl
-    spo = sFilter (singFun1 (Proxy :: Proxy (MatchSym1 PO)) (sMatch SPO)) sl
+    i = A.take (expVal sw * expVal sh) a
+    r = A.drop (expVal sw * expVal sh) a
   in
-    (init' sww, init' sii, init' sps, init' spo)
+    PCons sw sh (reshape (index2 (expVal sw) (expVal sh)) i) (unflatten sl r) 
 
-initD :: (A.Floating e, Prelude.Floating e, Plain e ~ e, Lift Exp e) => Int -> Int -> Int -> Sing (l :: [(NodeType, Nat, Nat)]) -> ([Acc (Matrix (ValueAndDerivative e))], [Acc (Matrix (ValueAndDerivative e))], [Acc (Matrix (ValueAndDerivative e))], [Acc (Matrix (ValueAndDerivative e))])
-initD i a b sl =
+eval :: (A.Num e) => Sing l -> Sing os -> AtIndex l '(1, os) 0 -> NeuralNetwork e l w i ps po s o -> PList w e -> [PList i e] -> PList ps e -> PList po e -> ([PList ('(1, os) ': '[]) e] -> Acc (Scalar e)) -> Acc (Scalar e)
+eval sl sos p nn ww ii ps po f = f $ eval'' sl sos p nn ww ii ps po
+
+eval'' :: (A.Num e) => Sing l -> Sing os -> AtIndex l '(1, os) 0 -> NeuralNetwork e l w i ps po s o -> PList w e -> [PList i e] -> PList ps e -> PList po e -> [PList ('(1, os) ': '[]) e]
+eval'' _ _ _ _ _ [] _ _ = []
+eval'' sl sos p nn ww (ih:it) ps po =
   let
-    sww = sFilter (singFun1 (Proxy :: Proxy (MatchSym1 W)) (sMatch SW)) sl
-    sii = sFilter (singFun1 (Proxy :: Proxy (MatchSym1 I)) (sMatch SI)) sl
-    sps = sFilter (singFun1 (Proxy :: Proxy (MatchSym1 PS)) (sMatch SPS)) sl
-    spo = sFilter (singFun1 (Proxy :: Proxy (MatchSym1 PO)) (sMatch SPO)) sl
+    r = PCons (sing :: SNat 1) sos (pAt p $ eval' sl nn ww ih ps po) PNil
   in
-    (initD' i a b sww, init' sii, init' sps, init' spo)
+    r : eval'' sl sos p nn ww it ps po
 
-initD' :: forall e l . (A.Floating e, Prelude.Floating e, Plain e ~ e, Lift Exp e) => Int -> Int -> Int -> Sing (l :: [(NodeType, Nat, Nat)]) -> [Acc (Matrix (ValueAndDerivative e))]
-initD' _ _ _ SNil = []
-initD' 0 a b (SCons (STuple3 _ w h) sl) = generate (index2 (expVal w) (expVal h)) (\i -> let k = unindex2 i in cond (A.fst k A.== Prelude.fromIntegral a A.&& A.snd k A.== Prelude.fromIntegral b) (lift (ValueAndDerivative 1.1 1 :: ValueAndDerivative e)) (lift (ValueAndDerivative 1.1 0 :: ValueAndDerivative e))) : initD' (-1) a b sl
-initD' i a b (SCons (STuple3 _ w h) sl) = generate (index2 (expVal w) (expVal h)) (\_ -> 1.1) : initD' (i-1) a b sl
-
-listVal :: Sing (l :: [(NodeType, Nat, Nat)]) -> [(NodeType, Int, Int)]
-listVal SNil = []
-listVal (SCons (STuple3 st sw sh) sl) = (fromSing st, intVal sw, intVal sh):(listVal sl)
-
-eval :: (A.Num e) => Sing l -> NeuralNetwork e l -> [Acc (Matrix e)] -> [[Acc (Matrix e)]] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [([Acc (Matrix e)], [Acc (Matrix e)])]
-eval sl nn ww [] ps po = []
-eval sl nn ww (ih:it) ps po =
-  let
-    r@(s, o) = eval'' sl nn ww ih ps po
-  in
-    r : eval sl nn ww it s o
-
-eval'' :: (A.Num e) => Sing l -> NeuralNetwork e l -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> ([Acc (Matrix e)], [Acc (Matrix e)])
-eval'' sl nn ww ii ps po =
-  let
-    li = Prelude.zip [1..] $ fromSing sl
-    s = Prelude.map Prelude.fst $ Prelude.filter (\(_, (t, _, _)) -> t Prelude.== S) li
-    o = Prelude.map Prelude.fst $ Prelude.filter (\(_, (t, _, _)) -> t Prelude.== O) li
-    r = eval' sl nn ww ii ps po
-  in
-    (Prelude.map (r Prelude.!!) s, Prelude.map (r Prelude.!!) o)
-
-eval' :: (A.Num e) => Sing l -> NeuralNetwork e l -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)] -> [Acc (Matrix e)]
-eval' sl (Unity w h) [] [] [] [] = [generate (index2 (expVal w) (expVal h)) (\_ -> 1)]
-eval' sl (Weight w h) ww [] [] [] = ww
-eval' sl (Input w h) [] ii [] [] = ii
-eval' sl (PreviousState w h) [] [] ps [] = ps
-eval' sl (PreviousOutput w h) [] [] [] po = po
-eval' (SCons _ sl) (State _ nn i w h) ww ii ps po =
+eval' :: (A.Num e) => Sing l -> NeuralNetwork e l w i ps po s o -> PList w e -> PList i e -> PList ps e -> PList po e -> PList l e
+eval' sl (Unity w h) PNil PNil PNil PNil = PCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> 1)) PNil
+eval' sl (Weight w h) ww PNil PNil PNil = ww
+eval' sl (Input w h) PNil ii PNil PNil = ii
+eval' sl (PreviousState w h) PNil PNil ps PNil = ps
+eval' sl (PreviousOutput w h) PNil PNil PNil po = po
+eval' (SCons _ sl) (State p nn i w h) ww ii ps po =
   let
     t = eval' sl nn ww ii ps po
   in
-    (t Prelude.!! (intVal i)) : t
-eval' (SCons _ sl) (Output _ nn i w h) ww ii ps po =
+    PCons w h (pAt p t) t
+eval' (SCons _ sl) (Output p nn i w h) ww ii ps po =
   let
     t = eval' sl nn ww ii ps po
   in
-    (t Prelude.!! (intVal i)) : t
-eval' sl (Union nn1 sl1 nn2 sl2) ww ii ps po =
+    PCons w h (pAt p t) t
+eval' sl (Union nn1 sl1 sw1 si1 sps1 spo1 _ ss1 nn2 sl2 sw2 si2 sps2 spo2 _ _) ww ii ps po =
   let
-    nww1 = intVal $ sLength $ sFilter (singFun1 (Proxy :: Proxy (MatchSym1 W)) (sMatch SW)) sl1
-    nii1 = intVal $ sLength $ sFilter (singFun1 (Proxy :: Proxy (MatchSym1 I)) (sMatch SI)) sl1
-    nps1 = intVal $ sLength $ sFilter (singFun1 (Proxy :: Proxy (MatchSym1 PS)) (sMatch SPS)) sl1
-    npo1 = intVal $ sLength $ sFilter (singFun1 (Proxy :: Proxy (MatchSym1 PO)) (sMatch SPO)) sl1
-    (ww1, ww2) = splitAt nww1 ww
-    (ii1, ii2) = splitAt nii1 ii
-    (ps1, ps2) = splitAt nps1 ps
-    (po1, po2) = splitAt npo1 po
+    (ww1, ww2) = pSplit sw1 sw2 ww
+    (ii1, ii2) = pSplit si1 si2 ii
+    (ps1, ps2) = pSplit sps1 sps2 ps 
+    (po1, po2) = pSplit spo1 spo2 po
     t1 = eval' sl1 nn1 ww1 ii1 ps1 po1
     t2 = eval' sl2 nn2 ww2 ii2 ps2 po2
   in
-    t1 Prelude.++ t2
-eval' (SCons _ sl) (Unary _ nn i w h (f, l)) ww ii ps po =
+    pJoin t1 t2
+eval' (SCons _ sl) (Unary p nn i w h (_, _, w', h', f, l)) ww ii ps po =
   let
     t = eval' sl nn ww ii ps po
   in
-    f (t Prelude.!! (intVal i)) : t
-eval' (SCons _ sl) (Binary _ _ nn i w h j w' h' (f, l)) ww ii ps po =
+    PCons w' h' (f (pAt p t)) t
+eval' (SCons _ sl) (Binary p q nn i w h j w' h' (_, _, _, _, w'', h'', f,  l)) ww ii ps po =
   let
     t = eval' sl nn ww ii ps po
   in
-    f (t Prelude.!! (intVal i)) (t Prelude.!! (intVal j)) : t
+    PCons w'' h'' (f (pAt p t) (pAt q t)) t
 
-data SomeNeuralNetwork e i o where
-  SomeNeuralNetwork :: forall e i o (l :: [(NodeType, Nat, Nat)]) . (A.Floating e) => Sing l -> AtIndex l '(1, i) ((Length l) - 1) -> AtIndex l '(1, o) 0 -> NeuralNetwork e l -> SomeNeuralNetwork e i o
+data SomeNeuralNetwork e is os where
+  SomeNeuralNetwork :: forall e l w i s o is os . (A.Floating e) => AtIndex l '(1, is) (Length l :- 1) -> AtIndex l '(1, os) 0 -> Sing l -> Sing w -> Sing i -> Sing s -> Sing o -> NeuralNetwork e l w i s o s o -> SomeNeuralNetwork e is os
+
+forwardParams :: (Exp e) -> Sing is -> Sing os -> SomeNeuralNetwork e is os -> Acc (Vector e)
+forwardParams x sis sos nn =
+  case nn of
+    SomeNeuralNetwork q1 q2 sl sw si ss so nn' ->
+      let
+        pw = NeuralNetwork2.init x sw
+        ps = NeuralNetwork2.init x ss
+        po = NeuralNetwork2.init x so
+      in
+        NeuralNetwork2.flatten $ pJoin pw (pJoin ps po)
+
+forward :: Sing is -> Sing os -> SomeNeuralNetwork e is os -> ([PList ('(1, os) ': '[]) e] -> Acc (Scalar e)) -> Acc (Vector e) -> [Acc (Vector e)] -> Acc (Scalar e)
+forward sis sos nn f p i =
+  case nn of
+    SomeNeuralNetwork q1 q2 sl sw si ss so nn' ->
+      let
+        pl = unflatten (sw %:++ ss %:++ so) p
+        pi = Prelude.map (unflatten si) i
+        (pw, pso) = pSplit sw (ss %:++ so) pl
+        (ps, po) = pSplit ss so pso
+      in
+        eval sl sos q2 nn' pw pi ps po f
 
 toFGL :: DynGraph gr => SomeNeuralNetwork e i o -> gr Label Label
 toFGL nn = case nn of
-  SomeNeuralNetwork _ _ _ nn' -> toFGL'' nn'
+  SomeNeuralNetwork _ _ _ _ _ _ _ nn' -> toFGL'' nn'
 
 data SomeSNat where
   SomeSNat :: SNat n -> SomeSNat
@@ -369,17 +394,17 @@ toSomeSNat n
   | otherwise = Just $ SomeSNat (sing :: SNat 0)
 
 addLayer :: (Elt e) => SNat i -> SNat o -> SNat o' -> SomeNeuralNetwork e i o -> SomeNeuralNetwork e i o'
-addLayer si so so' nn =
+addLayer sis sos sos' nn =
   let
     s0 = sing :: SNat 0
     s1 = sing :: SNat 1
   in
     case nn of
-      SomeNeuralNetwork sl spi spo nn' ->
+      SomeNeuralNetwork spi spo sl sw si ss so nn' ->
         let
-          (nn'', sl') = addLSTMLayer spo sl so so' s0 nn'
+          (nn'', sl', sw', si', ss', so', _, _) = addLSTMLayer spo sl sw si ss so ss so sos sos' s0 nn'
         in
-          SomeNeuralNetwork sl' $(tailN 30 [e|spi|]) Head nn''
+          SomeNeuralNetwork $(tailN 30 [e|spi|]) Head sl' sw' si' ss' so' nn''
 
 addLayers :: (Elt e) => SNat i -> SNat o -> Sing ((o' ': l) :: [Nat]) -> SomeNeuralNetwork e i o -> SomeNeuralNetwork e i o'
 addLayers si so (SCons so' SNil) nn = addLayer si so so' nn
@@ -389,6 +414,6 @@ makeNetwork :: (A.Floating e, Elt e) => SNat i -> Sing (l :: [Nat]) -> SNat o ->
 makeNetwork si sl so =
   let
     s1 = sing :: SNat 1
-    nn = SomeNeuralNetwork (SCons (STuple3 SI s1 si) SNil) Head Head $ Input s1 si
+    nn = SomeNeuralNetwork Head Head (SCons (STuple2 s1 si) SNil) SNil (SCons (STuple2 s1 si) SNil) SNil SNil $ Input s1 si
   in
     addLayers si si (SCons so (sReverse sl)) nn
