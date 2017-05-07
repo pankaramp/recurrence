@@ -75,6 +75,7 @@ executable recurrence
                        reflection >= 2.1 && < 2.2,
                        accelerate >= 1.0 && < 1.1,
                        accelerate-llvm-native >= 1.0 && < 1.1,
+                       linear-accelerate >= 0.3 && < 0.4,
                        type-list >= 0.5 && < 0.6,
                        array >= 0.5.1 && < 0.6,
                        ghc-typelits-natnormalise >= 0.5.2 && < 0.6
@@ -108,6 +109,7 @@ library
                        reflection >= 2.1 && < 2.2,
                        accelerate >= 1.0 && < 1.1,
                        accelerate-llvm-native >= 1.0 && < 1.1,
+                       linear-accelerate >= 0.3 && < 0.4,
                        --accelerate-llvm-ptx >= 1.0 && < 1.1,
                        type-list >= 0.5 && < 0.6,
                        array >= 0.5.1 && < 0.6,
