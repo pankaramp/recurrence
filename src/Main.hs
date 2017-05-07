@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Data.Array.Accelerate as A
-import Data.Array.Accelerate.Interpreter
+import Data.Array.Accelerate.LLVM.Native
 import Data.Graph.Inductive.Dot
 import Data.Graph.Inductive.PatriciaTree
 import NeuralNetwork2

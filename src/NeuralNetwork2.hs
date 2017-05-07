@@ -36,6 +36,13 @@ data PList (l :: [(Nat, Nat)]) e where
   PNil :: PList '[] e
   PCons :: SNat w -> SNat h -> Acc (Matrix e) -> PList l e -> PList ('(w, h) ': l) e
 
+pSingleton :: SNat w -> SNat h -> Acc (Matrix e) -> PList ('(w, h) ': []) e
+pSingleton sw sh a = PCons sw sh a PNil
+
+pAdd :: AtIndex l '(w, h) i -> PList l e -> PList ('(w, 'h) ': '[]) e -> PList l e
+pAdd Head (PCons sw sh a pt) (PCons _ _ b PNil) = PCons sw sh (A.zipWith (A.+) a b) pt
+pAdd (Tail p) (PCons _ _ _ pt) pb = pAdd p pt pb
+
 pAt :: AtIndex l '(w, h) i -> PList l e -> Acc (Matrix e)
 pAt Head (PCons _ _ a _) = a
 pAt (Tail p) (PCons _ _ _ l) = pAt p l
@@ -58,6 +65,8 @@ instance Show Label where
 
 type UnaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) = (Elt e) => (SNat w, SNat h, SNat w', SNat h', Acc (Matrix e) -> Acc (Matrix e), Label)
 type BinaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) (w'' :: Nat) (h'' :: Nat) = (Elt e) => (SNat w, SNat h, SNat w', SNat h', SNat w'', SNat h'', Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e), Label)
+
+jacobian :: UnaryFunction a w h w' h' -> PList ('(w, h) ': '[]) e -> Matrix 
 
 tnh :: (A.Floating a, Elt a) => Exp a -> Exp a
 tnh x = ((exp x) - (exp (-x))) / ((exp x) + (exp (-x)))
@@ -310,6 +319,32 @@ eval'' sl sos p nn ww (ih:it) ps po =
     r = PCons (sing :: SNat 1) sos (pAt p $ eval' sl nn ww ih ps po) PNil
   in
     r : eval'' sl sos p nn ww it ps po
+
+evalComplete :: (A.Num e) => Sing l -> Sing os -> AtIndex l '(1, os) 0 -> NeuralNetwork e l w i ps po s o -> PList w e -> [PList i e] -> PList ps e -> PList po e -> [PList l e]
+evalComplete _ _ _ _ _ [] _ _ = []
+evalComplete sl sos p nn ww (ih:it) ps po =
+  let
+    r = eval' sl nn ww ih ps po
+  in
+    r : evalComplete sl sos p nn ww it ps po
+
+ax = ay * dy/dx
+
+evalBlaBla :: (A.Num e) => PList ('(w, h) ': '[]) e -> NeuralNetwork e ('(w, h) ': l) w i ps po s o -> PList l e -> PList l e
+eval' a (Unity _ _) = id
+eval' a (State p _ _ _ _) tape = pAdd p tape a
+eval' a (Output p _ _ _ _) tape = pAdd p tape a
+eval' a (Union _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _) = id
+eval' a (Unary p nn _ _ _ (_, _, _, _, f, _)) tape =
+  let
+    t = eval' sl nn ww ii ps po
+  in
+    PCons w' h' (f (pAt p t)) t
+eval' (SCons _ sl) (Binary p q nn i w h j w' h' (_, _, _, _, w'', h'', f,  l)) ww ii ps po =
+  let
+    t = eval' sl nn ww ii ps po
+  in
+    PCons w'' h'' (f (pAt p t) (pAt q t)) t
 
 eval' :: (A.Num e) => Sing l -> NeuralNetwork e l w i ps po s o -> PList w e -> PList i e -> PList ps e -> PList po e -> PList l e
 eval' sl (Unity w h) PNil PNil PNil PNil = PCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> 1)) PNil
