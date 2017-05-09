@@ -14,10 +14,10 @@ data ValueAndDerivative e = ValueAndDerivative e e
   deriving (Typeable, Show, P.Eq)
 
 derivative :: forall e . (Elt e) => Exp (ValueAndDerivative e) -> Exp e
-derivative e = let (ValueAndDerivative x (_ :: Exp e)) = unlift e in x
+derivative e = let (ValueAndDerivative (_ :: Exp e) x) = unlift e in x
 
 value :: forall e . (Elt e) => Exp (ValueAndDerivative e) -> Exp e
-value e = let (ValueAndDerivative (_ :: Exp e) x) = unlift e in x
+value e = let (ValueAndDerivative x (_ :: Exp e)) = unlift e in x
 
 fromValue :: (A.Num e) => Exp e -> Exp (ValueAndDerivative e)
 fromValue e = lift (ValueAndDerivative e 0)

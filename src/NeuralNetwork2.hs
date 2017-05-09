@@ -3,6 +3,7 @@
 
 module NeuralNetwork2 where
 
+import Data.Array.Accelerate.Interpreter as I
 import qualified Data.Type.List as L
 import Helpers
 import GHC.TypeLits
@@ -20,7 +21,24 @@ import Data.Graph.Inductive
 import Data.Type.Equality
 import Data.Typeable
 import Data.Array.Accelerate as A
+import Data.List
 import ValueAndDerivative
+
+safeZipWith2 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Matrix a) -> Acc (Matrix b) -> Acc (Matrix c)
+safeZipWith2 f a b =
+  let
+    x = I.run $ unit $ unindex2 $ shape a
+    y = I.run $ unit $ unindex2 $ shape b
+  in
+    if (x Prelude.== y) then (A.zipWith f a b) else error ""
+
+safeZipWith3 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Array DIM3 a) -> Acc (Array DIM3 b) -> Acc (Array DIM3 c)
+safeZipWith3 f a b =
+  let
+    x = I.run $ unit $ unindex3 $ shape a
+    y = I.run $ unit $ unindex3 $ shape b
+  in
+    if (x Prelude.== y) then (A.zipWith f a b) else error ""
 
 data AtIndexNat (l :: [Nat]) (e :: Nat) (i :: Nat) where
   HeadNat :: AtIndexNat (x ': xs) x 0
@@ -37,28 +55,31 @@ data PList (l :: [(Nat, Nat)]) e where
   PNil :: PList '[] e
   PCons :: SNat w -> SNat h -> Acc (Matrix e) -> PList l e -> PList ('(w, h) ': l) e
 
-pSingleton :: SNat w -> SNat h -> Acc (Matrix e) -> PList ('(w, h) ': '[]) e
-pSingleton sw sh a = PCons sw sh a PNil
+pCons :: (A.Elt e) => SNat w -> SNat h -> Acc (Matrix e) -> PList l e -> PList ('(w, h) ': l) e
+pCons sw sh a l = PCons sw sh (safeZipWith2 (const) a (A.fill (index2 (expVal sw) (expVal sh)) (0 :: Exp Int))) l
+
+pSingleton :: (A.Elt e) => SNat w -> SNat h -> Acc (Matrix e) -> PList ('(w, h) ': '[]) e
+pSingleton sw sh a = pCons sw sh a PNil
 
 pAdd :: (A.Num e) => AtIndex l '(w, h) i -> PList l e -> PList ('(w, h) ': '[]) e -> PList l e
-pAdd Head (PCons sw sh a pt) (PCons _ _ b PNil) = PCons sw sh (A.zipWith (A.+) a b) pt
-pAdd (Tail p) (PCons w h a pt) pb = PCons w h a (pAdd p pt pb)
+pAdd Head (PCons sw sh a pt) (PCons _ _ b PNil) = pCons sw sh (safeZipWith2 (A.+) a b) pt
+pAdd (Tail p) (PCons w h a pt) pb = pCons w h a (pAdd p pt pb)
 
 pAt :: AtIndex l '(w, h) i -> PList l e -> Acc (Matrix e)
 pAt Head (PCons _ _ a _) = a
 pAt (Tail p) (PCons _ _ _ l) = pAt p l
 
-pSplit :: Sing l -> Sing l' -> PList (l :++ l') e -> (PList l e, PList l' e)
+pSplit :: (Elt e) => Sing l -> Sing l' -> PList (l :++ l') e -> (PList l e, PList l' e)
 pSplit SNil sl' pl = (PNil, pl)
 pSplit (SCons _ sl) sl' (PCons w h a pl) =
   let
     (p1, p2) = pSplit sl sl' pl
   in
-    (PCons w h a p1, p2)
+    (pCons w h a p1, p2)
 
-pJoin :: PList l e -> PList l' e -> PList (l :++ l') e
+pJoin :: (Elt e) => PList l e -> PList l' e -> PList (l :++ l') e
 pJoin PNil pl' = pl'
-pJoin (PCons w h a pl) pl' = PCons w h a (pJoin pl pl')
+pJoin (PCons w h a pl) pl' = pCons w h a (pJoin pl pl')
 
 newtype Label = Label String
 instance Show Label where
@@ -67,22 +88,66 @@ instance Show Label where
 type UnaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) = (Elt e) => (SNat w, SNat h, SNat w', SNat h', Acc (Matrix e) -> Acc (Matrix e), Label)
 type BinaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) (w'' :: Nat) (h'' :: Nat) = (Elt e) => (SNat w, SNat h, SNat w', SNat h', SNat w'', SNat h'', Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e), Label)
 
-jacobian :: (A.Num a) => UnaryFunction (ValueAndDerivative a) w h w' h' -> PList ('(w, h) ': '[]) a -> Acc (Vector a)
-jacobian f@(sw, sh, _, _, _, _) v =
+jacobian1 :: (A.Num a) => UnaryFunction (ValueAndDerivative a) w h w' h' -> PList ('(w, h) ': '[]) a -> [[Acc (Matrix a)]]
+jacobian1 f@(sw, sh, _, _, _, _) v =
   let
-    r = Prelude.map (\j -> Prelude.map (\i -> jacobian' i j f v) [0..(fromInteger $ fromSing sw)-1]) [0..(fromInteger $ fromSing sh)-1]
+    r = Prelude.map (\j -> Prelude.map (\i -> jacobian1' i j f v) [0..(fromInteger $ fromSing sw)-1]) [0..(fromInteger $ fromSing sh)-1]
   in
-    A.flatten r
+    r
 
-jacobian' :: (A.Num a) => Int -> Int -> UnaryFunction (ValueAndDerivative a) w h w' h' -> PList ('(w, h) ': '[]) a -> Acc (Matrix a)
-jacobian' k l (sw, sh, sw', sh', f, _) (PCons _ _ a PNil) = 
+jacobian1' :: (A.Num a) => Int -> Int -> UnaryFunction (ValueAndDerivative a) w h w' h' -> PList ('(w, h) ': '[]) a -> Acc (Matrix a)
+jacobian1' k l (sw, sh, sw', sh', f, _) (PCons _ _ a PNil) = 
   let
     i = index2 (lift k) (lift l)
     a' = A.map (lift1 fromValue) a
-    r = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) a'
+    a'' = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) a'
   in
-    A.map (lift1 derivative) r
-    
+    A.map (lift1 derivative) (f a'')
+
+jacobianl :: (A.Num a) => SNat w -> ([PList ('(1, w) ': '[]) (ValueAndDerivative a)] -> Acc (Scalar (ValueAndDerivative a))) -> [PList ('(1, w) ': '[]) a] -> [Acc (Matrix a)]
+jacobianl sw f v =
+  let
+    r = Prelude.map (\j -> Prelude.foldl (A.++) (A.use $ fromList (Z:.1:.0) []) $ Prelude.map (\i -> A.reshape (index2 1 (expVal sw)) $ jacobianl' sw i j f v) [0..(fromInteger $ fromSing sw)-1]) [0..(Prelude.length v)-1]
+  in
+    r
+
+jacobianl' :: (A.Num a) => SNat w -> Int -> Int -> ([PList ('(1, w) ': '[]) (ValueAndDerivative a)] -> Acc (Scalar (ValueAndDerivative a))) -> [PList ('(1, w) ': '[]) a] -> Acc (Scalar a)
+jacobianl' sw k l f vv = 
+  let
+    s1 = sing :: SNat 1
+    i = index2 1 (lift l)
+    vv' = Prelude.map (\(PCons _ _ a PNil) -> A.map (lift1 fromValue) a) vv
+    a'' = Prelude.map (\m -> if m Prelude./= k then pSingleton s1 sw (vv' Prelude.!! m) else pSingleton s1 sw $ A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) (vv' Prelude.!! m)) [0..((Prelude.length vv)-1)]
+  in
+    A.map (lift1 derivative) (f a'')
+
+jacobian2 :: (A.Num a) => BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) a -> ([[Acc (Matrix a)]], [[Acc (Matrix a)]])
+jacobian2 f@(sw, sh, sw', sh', _, _, _, _) v1 v2 =
+  let
+    r1 = Prelude.map (\j -> Prelude.map (\i -> jacobian2l' i j f v1 v2) [0..(fromInteger $ fromSing sw)-1]) [0..(fromInteger $ fromSing sh)-1]
+    r2 = Prelude.map (\j -> Prelude.map (\i -> jacobian2r' i j f v1 v2) [0..(fromInteger $ fromSing sw')-1]) [0..(fromInteger $ fromSing sh')-1]    
+  in
+    (r1, r2)
+
+jacobian2l' :: (A.Num a) => Int -> Int -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) b -> Acc (Matrix a)
+jacobian2l' k l (sw, sh, sw', sh', sw'', sh'', f, _) (PCons _ _ a PNil) (PCons _ _ b PNil) = 
+  let
+    i = index2 (lift k) (lift l)
+    a' = A.map (lift1 fromValue) a
+    b' = A.map (lift1 fromValue) a
+    a'' = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) a'
+  in
+    A.map (lift1 derivative) (f a'' b')
+
+jacobian2r' :: (A.Num a) => Int -> Int -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) b -> Acc (Matrix a)
+jacobian2r' k l (sw, sh, sw', sh', sw'', sh'', f, _) (PCons _ _ a PNil) (PCons _ _ b PNil) = 
+  let
+    i = index2 (lift k) (lift l)
+    a' = A.map (lift1 fromValue) a
+    b' = A.map (lift1 fromValue) a
+    b'' = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) b'
+  in
+    A.map (lift1 derivative) (f a' b'')
 
 tnh :: (A.Floating a, Elt a) => Exp a -> Exp a
 tnh x = ((exp x) - (exp (-x))) / ((exp x) + (exp (-x)))
@@ -97,13 +162,13 @@ sigm ::(A.Floating a) => SNat w -> SNat h -> UnaryFunction a w h w h
 sigm sw sh = (sw, sh, sw, sh, A.map sgm, Label "sigm")
 
 esum :: (A.Num e) => SNat w -> SNat h -> BinaryFunction e w h w h w h
-esum sw sh = (sw, sh, sw, sh, sw, sh, A.zipWith (+), Label ".+")
+esum sw sh = (sw, sh, sw, sh, sw, sh, safeZipWith2 (+), Label ".+")
 
 eprod :: (A.Num e) => SNat w -> SNat h -> BinaryFunction e w h w h w h
-eprod sw sh = (sw, sh, sw, sh, sw, sh, A.zipWith (*), Label ".*")
+eprod sw sh = (sw, sh, sw, sh, sw, sh, safeZipWith2 (*), Label ".*")
 
 prd :: (A.Num e, Elt e) => Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e)
-prd a b = A.fold (+) 0 $ A.zipWith (*) aRepl bRepl
+prd a b = A.fold (+) 0 $ safeZipWith3 (*) aRepl bRepl
   where
     Z :. rowsA :.     _ = unlift (shape a)    :: Z :. Exp Int :. Exp Int
     Z :.     _ :. colsB = unlift (shape b)    :: Z :. Exp Int :. Exp Int
@@ -310,7 +375,7 @@ intVal sn = fromInteger $ withKnownNat sn $ natVal sn
 
 init :: (Elt e, A.Floating e) => Exp e -> Sing (l :: [(Nat, Nat)]) -> PList l e
 init _ SNil = PNil
-init x (SCons (STuple2 w h) sl) = PCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> x)) (NeuralNetwork2.init x sl)
+init x (SCons (STuple2 w h) sl) = pCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> x)) (NeuralNetwork2.init x sl)
 
 flatten :: (Elt e) => PList l e -> Acc (Vector e)
 flatten PNil = A.use $ A.fromList (Z:.0) []
@@ -323,69 +388,184 @@ unflatten (SCons (STuple2 sw sh) sl) a =
     i = A.take (expVal sw * expVal sh) a
     r = A.drop (expVal sw * expVal sh) a
   in
-    PCons sw sh (reshape (index2 (expVal sw) (expVal sh)) i) (unflatten sl r) 
+    pCons sw sh (reshape (index2 (expVal sw) (expVal sh)) i) (unflatten sl r) 
 
-eval :: (A.Num e) => Sing l -> Sing os -> AtIndex l '(1, os) 0 -> NeuralNetwork e l w i ps po s o -> PList w e -> [PList i e] -> PList ps e -> PList po e -> ([PList ('(1, os) ': '[]) e] -> Acc (Scalar e)) -> Acc (Scalar e)
-eval sl sos p nn ww ii ps po f = f $ eval'' sl sos p nn ww ii ps po
-
-eval'' :: (A.Num e) => Sing l -> Sing os -> AtIndex l '(1, os) 0 -> NeuralNetwork e l w i ps po s o -> PList w e -> [PList i e] -> PList ps e -> PList po e -> [PList ('(1, os) ': '[]) e]
-eval'' _ _ _ _ _ [] _ _ = []
-eval'' sl sos p nn ww (ih:it) ps po =
+keepParams :: (A.Elt e) => NeuralNetwork (ValueAndDerivative e) l w i ps po s o -> PList l e -> (PList w e, PList ps e, PList po e, PList s e, PList o e)
+keepParams (Unity _ _) _ = (PNil, PNil, PNil, PNil, PNil)
+keepParams (Weight w h) l = (pSingleton w h (pAt Head l), PNil, PNil, PNil, PNil)
+keepParams (Input _ _) _ = (PNil, PNil, PNil, PNil, PNil)
+keepParams (PreviousState w h) l = (PNil, pSingleton w h (pAt Head l), PNil, PNil, PNil)
+keepParams (PreviousOutput w h) l = (PNil, PNil, pSingleton w h (pAt Head l), PNil, PNil)
+keepParams (State _ nn _ w h) (PCons _ _ a l) = let (ww, ps, po, s, o) = keepParams nn l in (ww, ps, po, pCons w h a s, o)
+keepParams (Output _ nn _ w h) (PCons _ _ a l) = let (ww, ps, po, s, o) = keepParams nn l in (ww, ps, po, s, pCons w h a o)
+keepParams (Union nn1 sl1 _ _ _ _ _ _ nn2 sl2 _ _ _ _  _ _) l =
   let
-    r = PCons (sing :: SNat 1) sos (pAt p $ eval' sl nn ww ih ps po) PNil
+    (l1, l2) = pSplit sl1 sl2 l
+    (w1, ps1, po1, s1, o1) = keepParams nn1 l1
+    (w2, ps2, po2, s2, o2) = keepParams nn2 l2
   in
-    r : eval'' sl sos p nn ww it ps po
+    (pJoin w1 w2, pJoin ps1 ps2, pJoin po1 po2, pJoin s1 s2, pJoin o1 o2)
+keepParams (Unary _ nn _ _ _ _) (PCons _ _ _ l)  = keepParams nn l
+keepParams (Binary _ _ nn _ _ _ _ _ _ _) (PCons _ _ _ l) = keepParams nn l
 
-evalComplete :: (A.Num e) => Sing l -> Sing os -> AtIndex l '(1, os) 0 -> NeuralNetwork e l w i ps po s o -> PList w e -> [PList i e] -> PList ps e -> PList po e -> [PList l e]
-evalComplete _ _ _ _ _ [] _ _ = []
-evalComplete sl sos p nn ww (ih:it) ps po =
+copyParams :: (A.Num e) => NeuralNetwork (ValueAndDerivative e) l w i ps po s o -> PList s e -> PList o e -> PList l e -> PList l e
+copyParams (Unity _ _) s o l = l
+copyParams (Weight _ _) s o l = l
+copyParams (Input _ _) s o l = l
+copyParams (PreviousState _ _) s o l = l
+copyParams (PreviousOutput _ _) s o l = l
+copyParams (State _ nn _ w h) (PCons _ _ as s) o (PCons _ _ al l) = pAdd Head (pCons w h al $ copyParams nn s o l) (pSingleton w h as)
+copyParams (Output _ nn _ w h) s (PCons _ _ ao o) (PCons _ _ al l) = pAdd Head (pCons w h al $ copyParams nn s o l) (pSingleton w h ao)
+copyParams (Union nn1 sl1 _ _ _ _ ss1 so1 nn2 sl2 _ _ _ _ ss2 so2) s o l =
   let
-    r = eval' sl nn ww ih ps po
+    (s1, s2) = pSplit ss1 ss2 s
+    (o1, o2) = pSplit so1 so2 o
+    (l1, l2) = pSplit sl1 sl2 l
   in
-    r : evalComplete sl sos p nn ww it ps po
+    pJoin (copyParams nn1 s1 o1 l1) (copyParams nn2 s2 o2 l2)
+copyParams (Unary _ nn _ _ _ _) s o (PCons w h a l) = pCons w h a $ copyParams nn s o l
+copyParams (Binary _ _ nn _ _ _ _ _ _ _) s o (PCons w h a l) = pCons w h a $ copyParams nn s o l
 
---ax = ay * dy/dx
+toSomeSNat :: Int -> SomeSNat
+toSomeSNat 0 = SomeSNat (sing :: SNat 0)
+toSomeSNat i | i Prelude.> 0 = case toSomeSNat (i-1) of
+                 SomeSNat s -> SomeSNat (s %:+ (sing :: SNat 1))
+toSomeSNat i | i Prelude.< 0 = case toSomeSNat (i+1) of
+                 SomeSNat s -> SomeSNat (s %:- (sing :: SNat 1))
 
-eval' :: (A.Num e) => Sing l -> NeuralNetwork e l w i ps po s o -> PList w e -> PList i e -> PList ps e -> PList po e -> PList l e -> (PList l e, PList l e) 
-eval' sl (Unity w h) PNil PNil PNil PNil adj = (PCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> 1)) PNil, adj)
-eval' sl (Weight w h) ww PNil PNil PNil adj = (ww, adj)
-eval' sl (Input w h) PNil ii PNil PNil adj = (ii, adj)
-eval' sl (PreviousState w h) PNil PNil ps PNil adj = (adj, ps)
-eval' sl (PreviousOutput w h) PNil PNil PNil po adj = (adj, po)
-eval' (SCons _ sl) (State p nn i w h) ww ii ps po (PCons _ _ a adj) =
+data SomeSNat where
+  SomeSNat :: forall n . SNat n -> SomeSNat
+
+evalBackward :: (A.Num e) => Sing l -> NeuralNetwork (ValueAndDerivative e) l w i ps po s o -> PList l e -> PList l e -> PList l e
+evalBackward sl (Unity w h) v adj = adj
+evalBackward sl (Weight w h) v adj = adj
+evalBackward sl (Input w h) v adj = adj
+evalBackward sl (PreviousState w h) v adj = adj
+evalBackward sl (PreviousOutput w h) v adj = adj
+evalBackward (SCons _ sl) (State p nn i w h) (PCons _ _ _ v) (PCons _ _ a adj) =
   let
-    (t, adj') = eval' sl nn ww ii ps po adj
+    adj' = pAdd p adj $ pSingleton w h a
   in
-    (PCons w h (pAt p t) t, PCons w h a (pAdd p adj' (pSingleton w h a)))
-eval' (SCons _ sl) (Output p nn i w h) ww ii ps po (PCons _ _ a adj) =
+    pCons w h a $ evalBackward sl nn v adj'
+evalBackward (SCons _ sl) (Output p nn i w h) (PCons _ _ _ v) (PCons _ _ a adj) =
   let
-    (t, adj') = eval' sl nn ww ii ps po adj
+    adj' = pAdd p adj $ pSingleton w h a
   in
-    (PCons w h (pAt p t) t, PCons w h a (pAdd p adj' (pSingleton w h a)))
-eval' sl (Union nn1 sl1 sw1 si1 sps1 spo1 _ ss1 nn2 sl2 sw2 si2 sps2 spo2 _ _) ww ii ps po adj =
+    pCons w h a $ evalBackward sl nn v adj'
+evalBackward sl (Union nn1 sl1 sw1 si1 sps1 spo1 _ ss1 nn2 sl2 sw2 si2 sps2 spo2 _ _) v adj =
+  let
+    (adj1, adj2) = pSplit sl1 sl2 adj
+    (v1, v2) = pSplit sl1 sl2 v
+    adj1' = evalBackward sl1 nn1 v1 adj1
+    adj2' = evalBackward sl2 nn2 v2 adj2
+  in
+    pJoin adj1' adj2'
+evalBackward (SCons _ sl) (Unary p nn i w h ff@(_, _, w', h', f, l)) (PCons _ _ _ v) (PCons _ _ a adj) =
+  let
+    j = jacobian1 ff (pSingleton w h $ pAt p v)
+    x' = Prelude.map (Prelude.map (A.reshape (index2 1 1) . A.sum . safeZipWith2 (A.*) a)) j
+    x = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) [])) x'
+    adj' = pAdd p adj $ pSingleton w h x
+  in
+    pCons w' h' a $ evalBackward sl nn v adj'
+evalBackward (SCons _ sl) (Binary p q nn i w h j w' h' ff@(_, _, _, _, w'', h'', f,  l)) (PCons _ _ _ v) (PCons _ _ a adj) =
+  let
+    (j1, j2) = jacobian2 ff (pSingleton w h $ pAt p v) (pSingleton w' h' $ pAt q v)
+    x1' = Prelude.map (Prelude.map (A.reshape (index2 (1 :: Exp Int) (1 :: Exp Int)) . A.sum . safeZipWith2 (A.*) a)) j1
+    x2' = Prelude.map (Prelude.map (A.reshape (index2 (1 :: Exp Int) (1 :: Exp Int)) . A.sum . safeZipWith2 (A.*) a)) j2
+    x1 = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) [])) x2'
+    x2 = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) [])) x2'
+    adj' = pAdd p (pAdd q adj $ pSingleton w' h' x2) $ pSingleton w h x1
+  in
+    pCons w'' h'' a $ evalBackward sl nn v adj'
+
+pSize :: Sing (l :: [(Nat, Nat)]) -> Int
+pSize sl =
+  let
+    l = fromSing sl
+  in
+    Prelude.fromInteger $ Prelude.foldl (\r (a,b) -> r+a*b) 0 l
+
+pExtend :: (A.Num e) => Sing l -> AtIndex l '(1, os) 0 -> PList ('(1, os) ': '[]) e -> PList l e
+pExtend sl p e =
+  let
+    a = A.fill (index1 $ lift $ pSize sl) 0
+    pl = unflatten sl a
+  in
+    pAdd p pl e
+
+evalBackwardL :: (A.Floating e) => Sing l -> AtIndex l '(1, os) 0 -> NeuralNetwork (ValueAndDerivative e) l w i s o s o -> [PList l e] -> [PList ('(1, os) ': '[]) e] -> PList s e -> PList o e -> PList l e
+evalBackwardL sl p nn [i] [a] ps po =
+  let
+    adj = pExtend sl p a
+    adj' = copyParams nn ps po adj
+    adj'' = evalBackward sl nn i adj'
+  in
+    adj''  
+evalBackwardL sl p nn i a ps po = foldr step (NeuralNetwork2.init 0 sl) (Prelude.zip i a)
+  where step (ii, aa) adj =
+          let
+            (_, ps, po, _, _) = keepParams nn adj
+            adj' = pExtend sl p aa
+            adj'' = copyParams nn ps po adj'
+            adj''' = evalBackward sl nn ii adj''
+          in
+            adj'''
+
+evalForwardL :: (A.Num e) => Sing l -> NeuralNetwork (ValueAndDerivative e) l w i s o s o -> PList w e -> [PList i e] -> PList s e -> PList o e -> [PList l e]
+evalForwardL sl nn w [] s o = []
+evalForwardL sl nn w i s o = Prelude.fst $ foldl' step ([], (s, o)) i
+  where step (r, (ss, oo)) ii =
+          let
+            r' = evalForward sl nn w ii ss oo
+            (_, _, _, s', o') = keepParams nn r'
+          in
+            (r' : r, (s', o'))
+
+evalForward :: (A.Num e) => Sing l -> NeuralNetwork (ValueAndDerivative e) l w i ps po s o -> PList w e -> PList i e -> PList ps e -> PList po e -> PList l e
+evalForward sl (Unity w h) PNil PNil PNil PNil = pCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> 1)) PNil
+evalForward sl (Weight w h) ww PNil PNil PNil = ww
+evalForward sl (Input w h) PNil ii PNil PNil = ii
+evalForward sl (PreviousState w h) PNil PNil ps PNil = ps
+evalForward sl (PreviousOutput w h) PNil PNil PNil po = po
+evalForward (SCons _ sl) (State p nn i w h) ww ii ps po =
+  let
+    t = evalForward sl nn ww ii ps po
+  in
+    pCons w h (pAt p t) t
+evalForward (SCons _ sl) (Output p nn i w h) ww ii ps po =
+  let
+    t = evalForward sl nn ww ii ps po
+  in
+    pCons w h (pAt p t) t
+evalForward sl (Union nn1 sl1 sw1 si1 sps1 spo1 _ _ nn2 sl2 sw2 si2 sps2 spo2 _ _) ww ii ps po =
   let
     (ww1, ww2) = pSplit sw1 sw2 ww
     (ii1, ii2) = pSplit si1 si2 ii
     (ps1, ps2) = pSplit sps1 sps2 ps 
     (po1, po2) = pSplit spo1 spo2 po
-    (adj1, adj2) = pSplit sl1 sl2 adj
-    (t1, adj1') = eval' sl1 nn1 ww1 ii1 ps1 po1 adj1
-    (t2, adj2') = eval' sl2 nn2 ww2 ii2 ps2 po2 adj2
+    t1 = evalForward sl1 nn1 ww1 ii1 ps1 po1
+    t2 = evalForward sl2 nn2 ww2 ii2 ps2 po2
   in
-    (pJoin t1 t2, pJoin adj1' adj2')
-eval' (SCons _ sl) (Unary p nn i w h (_, _, w', h', f, l)) ww ii ps po (PCons _ _ a adj) =
+    pJoin t1 t2
+evalForward (SCons _ sl) (Unary p nn i w h ff@(_, _, w', h', f, l)) ww ii ps po =
   let
-    (t, adj') = eval' sl nn ww ii ps po adj
+    t = evalForward sl nn ww ii ps po
+    d = pAt p t
+    v = A.map (lift1 value) $ f $ A.map (lift1 fromValue) d
   in
-    (PCons w' h' (f (pAt p t)) t, PCons w' h' a (pAdd p adj' (pSingleton w h a)))
-eval' (SCons _ sl) (Binary p q nn i w h j w' h' (_, _, _, _, w'', h'', f,  l)) ww ii ps po (PCons _ _ a adj) =
+    pCons w' h' v t
+evalForward (SCons _ sl) (Binary p q nn i w h j w' h' ff@(_, _, _, _, w'', h'', f,  l)) ww ii ps po =
   let
-    (t, adj') = eval' sl nn ww ii ps po adj
+    t = evalForward sl nn ww ii ps po
+    d1 = pAt p t
+    d2 = pAt q t
+    v = A.map (lift1 value) $ f (A.map (lift1 fromValue) d1) (A.map (lift1 fromValue) d2)
   in
-    (PCons w'' h'' (f (pAt p t) (pAt q t)) t, PCons w'' h'' a (pAdd q (pAdd p adj' (pSingleton w h a)) (pSingleton w' h' a)))
+    pCons w'' h'' v t
 
 data SomeNeuralNetwork e is os where
-  SomeNeuralNetwork :: forall e l w i s o is os . (A.Floating e) => AtIndex l '(1, is) (Length l :- 1) -> AtIndex l '(1, os) 0 -> Sing l -> Sing w -> Sing i -> Sing s -> Sing o -> NeuralNetwork e l w i s o s o -> SomeNeuralNetwork e is os
+  SomeNeuralNetwork :: forall e l w i s o is os . (A.Floating e) => AtIndex l '(1, is) (Length l :- 1) -> AtIndex l '(1, os) 0 -> Sing l -> Sing w -> Sing i -> Sing s -> Sing o -> NeuralNetwork (ValueAndDerivative e) l w i s o s o -> SomeNeuralNetwork e is os
 
 gradientParams :: (Exp e) -> (Exp e) -> Sing is -> Sing os -> SomeNeuralNetwork e is os -> [Acc (Vector e)]
 gradientParams x y sis sos nn =
@@ -411,17 +591,34 @@ forwardParams x sis sos nn =
       in
         NeuralNetwork2.flatten $ pJoin pw (pJoin ps po)
 
-gradient :: forall e is os . (Prelude.Num e, A.Num e, Lift Exp e, e ~ Plain e) => Sing is -> Sing os -> SomeNeuralNetwork (ValueAndDerivative e) is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector e)] -> Acc (Vector e)
+gradient2 :: forall e is os . (Prelude.Floating e, A.Floating e, Lift Exp e, e ~ Plain e) => Sing is -> Sing os -> SomeNeuralNetwork e is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector e)] -> Acc (Vector e)
+gradient2 sis sos nn f i =
+  case nn of
+    SomeNeuralNetwork q1 q2 sl sw si ss so nn' ->
+      let
+        s1 = sing :: SNat 1
+        pl = NeuralNetwork2.init 0.5 (sw %:++ ss %:++ so)
+        pi = Prelude.map (unflatten si) i
+        (pw, pso) = pSplit sw (ss %:++ so) pl
+        (ps, po) = pSplit ss so pso
+        v = evalForwardL sl nn' pw pi ps po
+        j = Prelude.map (\a -> pCons s1 sos a PNil) $ jacobianl sos f (Prelude.map (\l -> pCons s1 sos (pAt q2 l) PNil) v)
+        g = evalBackwardL sl q2 nn' v j (NeuralNetwork2.init 0 ss) (NeuralNetwork2.init 0 so)
+        (w', ps', po', _, _) = keepParams nn' g
+      in
+        (NeuralNetwork2.flatten w') A.++ (NeuralNetwork2.flatten ps') A.++ (NeuralNetwork2.flatten po')
+
+gradient :: forall e is os . (Prelude.Floating e, A.Floating e, Lift Exp e, e ~ Plain e) => Sing is -> Sing os -> SomeNeuralNetwork (ValueAndDerivative e) is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector e)] -> Acc (Vector e)
 gradient sis sos nn f i =
   let
     g = gradient' sis sos nn f (Prelude.map (A.map (lift1 fromValue)) i)
   in
     A.map (lift1 derivative) g
 
-gradient' :: forall e is os . (Prelude.Num e, A.Elt e, Lift Exp e, e ~ Plain e) => Sing is -> Sing os -> SomeNeuralNetwork (ValueAndDerivative e) is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector (ValueAndDerivative e))] -> Acc (Vector (ValueAndDerivative e))
+gradient' :: forall e is os . (Prelude.Floating e, A.Elt e, Lift Exp e, e ~ Plain e) => Sing is -> Sing os -> SomeNeuralNetwork (ValueAndDerivative e) is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector (ValueAndDerivative e))] -> Acc (Vector (ValueAndDerivative e))
 gradient' sis sos nn f i =
   let
-    gp = gradientParams (lift $ ValueAndDerivative (0 :: e) (0 :: e)) (lift $ ValueAndDerivative (0 :: e) (1 :: e)) sis sos nn
+    gp = gradientParams (lift $ ValueAndDerivative (0.5 :: e) (0 :: e)) (lift $ ValueAndDerivative (0.5 :: e) (1 :: e)) sis sos nn
     rs = Prelude.map (\p -> forward sis sos nn f p i) gp :: [Acc (Scalar (ValueAndDerivative e))]
     ds = Prelude.map (reshape (index1 1)) rs
   in
@@ -436,22 +633,13 @@ forward sis sos nn f p i =
         pi = Prelude.map (unflatten si) i
         (pw, pso) = pSplit sw (ss %:++ so) pl
         (ps, po) = pSplit ss so pso
+        r = evalForwardL sl nn' pw pi ps po        
       in
-        eval sl sos q2 nn' pw pi ps po f
+        f $ Prelude.map (\rr -> pCons (sing ::SNat 1) sos (pAt q2 rr) PNil) r
 
 toFGL :: DynGraph gr => SomeNeuralNetwork e i o -> gr Label Label
 toFGL nn = case nn of
   SomeNeuralNetwork _ _ _ _ _ _ _ nn' -> toFGL'' nn'
-
-data SomeSNat where
-  SomeSNat :: SNat n -> SomeSNat
-
-toSomeSNat :: Int -> Maybe SomeSNat
-toSomeSNat n
-  | n Prelude.> 0 = case toSomeSNat (n-1) of
-      Just (SomeSNat sn) -> Just $ SomeSNat $ sn %:+ (sing :: SNat 1)
-  | n Prelude.< 0 = Nothing
-  | otherwise = Just $ SomeSNat (sing :: SNat 0)
 
 addLayer :: (Elt e) => SNat i -> SNat o -> SNat o' -> SomeNeuralNetwork e i o -> SomeNeuralNetwork e i o'
 addLayer sis sos sos' nn =
