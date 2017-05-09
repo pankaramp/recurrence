@@ -30,7 +30,7 @@ safeZipWith2 f a b =
     x = I.run $ unit $ unindex2 $ shape a
     y = I.run $ unit $ unindex2 $ shape b
   in
-    if (x Prelude.== y) then (A.zipWith f a b) else error ""
+    if (x Prelude.== y) then (A.zipWith f a b) else error $ "invalid bounds: " Prelude.++ (show $ I.run $ unit $ shape a) Prelude.++ ", " Prelude.++ (show $ I.run $ unit $ shape b)
 
 safeZipWith3 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Array DIM3 a) -> Acc (Array DIM3 b) -> Acc (Array DIM3 c)
 safeZipWith3 f a b =
@@ -38,7 +38,7 @@ safeZipWith3 f a b =
     x = I.run $ unit $ unindex3 $ shape a
     y = I.run $ unit $ unindex3 $ shape b
   in
-    if (x Prelude.== y) then (A.zipWith f a b) else error ""
+    if (x Prelude.== y) then (A.zipWith f a b) else error $ "invalid bounds: " Prelude.++ (show $ I.run $ unit $ shape a) Prelude.++ ", " Prelude.++ (show $ I.run $ unit $ shape b)
 
 data AtIndexNat (l :: [Nat]) (e :: Nat) (i :: Nat) where
   HeadNat :: AtIndexNat (x ': xs) x 0
@@ -129,22 +129,22 @@ jacobian2 f@(sw, sh, sw', sh', _, _, _, _) v1 v2 =
   in
     (r1, r2)
 
-jacobian2l' :: (A.Num a) => Int -> Int -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) b -> Acc (Matrix a)
+jacobian2l' :: (A.Num a) => Int -> Int -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) a -> Acc (Matrix a)
 jacobian2l' k l (sw, sh, sw', sh', sw'', sh'', f, _) (PCons _ _ a PNil) (PCons _ _ b PNil) = 
   let
     i = index2 (lift k) (lift l)
     a' = A.map (lift1 fromValue) a
-    b' = A.map (lift1 fromValue) a
+    b' = A.map (lift1 fromValue) b
     a'' = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) a'
   in
     A.map (lift1 derivative) (f a'' b')
 
-jacobian2r' :: (A.Num a) => Int -> Int -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) b -> Acc (Matrix a)
+jacobian2r' :: (A.Num a) => Int -> Int -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) a -> Acc (Matrix a)
 jacobian2r' k l (sw, sh, sw', sh', sw'', sh'', f, _) (PCons _ _ a PNil) (PCons _ _ b PNil) = 
   let
     i = index2 (lift k) (lift l)
     a' = A.map (lift1 fromValue) a
-    b' = A.map (lift1 fromValue) a
+    b' = A.map (lift1 fromValue) b
     b'' = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) b'
   in
     A.map (lift1 derivative) (f a' b'')
@@ -444,14 +444,14 @@ evalBackward sl (PreviousState w h) v adj = adj
 evalBackward sl (PreviousOutput w h) v adj = adj
 evalBackward (SCons _ sl) (State p nn i w h) (PCons _ _ _ v) (PCons _ _ a adj) =
   let
-    adj' = pAdd p adj $ pSingleton w h a
+    adjS' = pAdd p adj $ pSingleton w h a
   in
-    pCons w h a $ evalBackward sl nn v adj'
+    pCons w h a $ evalBackward sl nn v adjS'
 evalBackward (SCons _ sl) (Output p nn i w h) (PCons _ _ _ v) (PCons _ _ a adj) =
   let
-    adj' = pAdd p adj $ pSingleton w h a
+    adjO' = pAdd p adj $ pSingleton w h a
   in
-    pCons w h a $ evalBackward sl nn v adj'
+    pCons w h a $ evalBackward sl nn v adjO'
 evalBackward sl (Union nn1 sl1 sw1 si1 sps1 spo1 _ ss1 nn2 sl2 sw2 si2 sps2 spo2 _ _) v adj =
   let
     (adj1, adj2) = pSplit sl1 sl2 adj
@@ -464,20 +464,20 @@ evalBackward (SCons _ sl) (Unary p nn i w h ff@(_, _, w', h', f, l)) (PCons _ _ 
   let
     j = jacobian1 ff (pSingleton w h $ pAt p v)
     x' = Prelude.map (Prelude.map (A.reshape (index2 1 1) . A.sum . safeZipWith2 (A.*) a)) j
-    x = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) [])) x'
-    adj' = pAdd p adj $ pSingleton w h x
+    x = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.(fromInteger $ fromSing w):.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.1:.0) [])) x'
+    adjU' = pAdd p adj $ pSingleton w h x
   in
-    pCons w' h' a $ evalBackward sl nn v adj'
+    pCons w' h' a $ evalBackward sl nn v adjU'
 evalBackward (SCons _ sl) (Binary p q nn i w h j w' h' ff@(_, _, _, _, w'', h'', f,  l)) (PCons _ _ _ v) (PCons _ _ a adj) =
   let
     (j1, j2) = jacobian2 ff (pSingleton w h $ pAt p v) (pSingleton w' h' $ pAt q v)
     x1' = Prelude.map (Prelude.map (A.reshape (index2 (1 :: Exp Int) (1 :: Exp Int)) . A.sum . safeZipWith2 (A.*) a)) j1
     x2' = Prelude.map (Prelude.map (A.reshape (index2 (1 :: Exp Int) (1 :: Exp Int)) . A.sum . safeZipWith2 (A.*) a)) j2
-    x1 = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) [])) x2'
-    x2 = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.0:.0) [])) x2'
-    adj' = pAdd p (pAdd q adj $ pSingleton w' h' x2) $ pSingleton w h x1
+    x1 = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.(fromInteger $ fromSing w):.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.1:.0) [])) x1'
+    x2 = Prelude.foldl (A.++) (A.use $ A.fromList (Z:.(fromInteger $ fromSing w'):.0) []) $ Prelude.map (A.transpose . Prelude.foldl (A.++) (A.use $ A.fromList (Z:.1:.0) [])) x2'
+    adjB' = pAdd p (pAdd q adj $ pSingleton w' h' x2) $ pSingleton w h x1
   in
-    pCons w'' h'' a $ evalBackward sl nn v adj'
+    pCons w'' h'' a $ evalBackward sl nn v adjB'
 
 pSize :: Sing (l :: [(Nat, Nat)]) -> Int
 pSize sl =
