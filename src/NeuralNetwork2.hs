@@ -23,7 +23,6 @@ import Data.Typeable
 import Data.Array.Accelerate as A
 import Data.List
 import ValueAndDerivative
-import Debug.Trace
 
 safeZipWith1 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Vector a) -> Acc (Vector b) -> Acc (Vector c)
 safeZipWith1 = A.zipWith
@@ -109,14 +108,14 @@ type BinaryFunction e (w :: Nat) (h :: Nat) (w' :: Nat) (h' :: Nat) (w'' :: Nat)
 jacobian1 :: (A.Num a) => UnaryFunction (ValueAndDerivative a) w h w' h' -> PList ('(w, h) ': '[]) a -> [[Acc (Matrix a)]]
 jacobian1 f@(sw, sh, _, _, _, _) v =
   let
-    r = Prelude.map (\j -> Prelude.map (\i -> jacobian1' i j f v) [0..(fromInteger $ fromSing sw)-1]) [0..(fromInteger $ fromSing sh)-1]
+    r = Prelude.map (\j -> Prelude.map (\i -> jacobian1' (unit $ constant i) (unit $ constant j) f v) [0..(fromInteger $ fromSing sw)-1]) [0..(fromInteger $ fromSing sh)-1]
   in
     r
 
-jacobian1' :: (A.Num a) => Int -> Int -> UnaryFunction (ValueAndDerivative a) w h w' h' -> PList ('(w, h) ': '[]) a -> Acc (Matrix a)
+jacobian1' :: (A.Num a) => Acc (Scalar Int) -> Acc (Scalar Int) -> UnaryFunction (ValueAndDerivative a) w h w' h' -> PList ('(w, h) ': '[]) a -> Acc (Matrix a)
 jacobian1' k l (sw, sh, sw', sh', f, _) (PCons _ _ a PNil) = 
   let
-    i = index2 (lift k) (lift l)
+    i = index2 (the k) (the l)
     a' = A.map (lift1 fromValue) a
     a'' = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) a'
   in
@@ -125,42 +124,42 @@ jacobian1' k l (sw, sh, sw', sh', f, _) (PCons _ _ a PNil) =
 jacobianl :: (A.Num a) => SNat w -> ([PList ('(1, w) ': '[]) (ValueAndDerivative a)] -> Acc (Scalar (ValueAndDerivative a))) -> [PList ('(1, w) ': '[]) a] -> [Acc (Matrix a)]
 jacobianl sw f v =
   let
-    r = Prelude.map (\j -> Prelude.foldl (A.++) (A.use $ fromList (Z:.1:.0) []) $ Prelude.map (\i -> A.reshape (index2 1 (expVal sw)) $ jacobianl' sw i j f v) [0..(fromInteger $ fromSing sw)-1]) [0..(Prelude.length v)-1]
+    r = Prelude.map (\j -> Prelude.foldl (A.++) (A.use $ fromList (Z:.1:.0) []) $ Prelude.map (\i -> A.reshape (index2 1 (expVal sw)) $ jacobianl' sw (unit $ constant i) j f v) [0..(fromInteger $ fromSing sw)-1]) [0..(Prelude.length v)-1]
   in
     r
 
-jacobianl' :: (A.Num a) => SNat w -> Int -> Int -> ([PList ('(1, w) ': '[]) (ValueAndDerivative a)] -> Acc (Scalar (ValueAndDerivative a))) -> [PList ('(1, w) ': '[]) a] -> Acc (Scalar a)
+jacobianl' :: (A.Num a) => SNat w -> Acc (Scalar Int) -> Int -> ([PList ('(1, w) ': '[]) (ValueAndDerivative a)] -> Acc (Scalar (ValueAndDerivative a))) -> [PList ('(1, w) ': '[]) a] -> Acc (Scalar a)
 jacobianl' sw k l f vv = 
   let
     s1 = sing :: SNat 1
-    i = index2 0 (lift k)
+    i = index2 0 (the k)
     vv' = Prelude.map (\(PCons _ _ a PNil) -> A.map (lift1 fromValue) a) vv
     a'' = Prelude.map (\m -> if m Prelude./= l then pSingleton s1 sw (vv' Prelude.!! m) else pSingleton s1 sw $ A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) (vv' Prelude.!! m)) [0..((Prelude.length vv)-1)]
   in
-    A.map (lift1 derivative) (traceShow (I.run $ f a'') $ f a'')
+    A.map (lift1 derivative) (f a'')
 
 jacobian2 :: (A.Num a) => BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) a -> ([[Acc (Matrix a)]], [[Acc (Matrix a)]])
 jacobian2 f@(sw, sh, sw', sh', _, _, _, _) v1 v2 =
   let
-    r1 = Prelude.map (\j -> Prelude.map (\i -> jacobian2l' i j f v1 v2) [0..(fromInteger $ fromSing sw)-1]) [0..(fromInteger $ fromSing sh)-1]
-    r2 = Prelude.map (\j -> Prelude.map (\i -> jacobian2r' i j f v1 v2) [0..(fromInteger $ fromSing sw')-1]) [0..(fromInteger $ fromSing sh')-1]    
+    r1 = Prelude.map (\j -> Prelude.map (\i -> jacobian2l' (unit $ constant i) (unit $ constant j) f v1 v2) [0..(fromInteger $ fromSing sw)-1]) [0..(fromInteger $ fromSing sh)-1]
+    r2 = Prelude.map (\j -> Prelude.map (\i -> jacobian2r' (unit $ constant i) (unit $ constant j) f v1 v2) [0..(fromInteger $ fromSing sw')-1]) [0..(fromInteger $ fromSing sh')-1]    
   in
     (r1, r2)
 
-jacobian2l' :: (A.Num a) => Int -> Int -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) a -> Acc (Matrix a)
+jacobian2l' :: (A.Num a) => Acc (Scalar Int) -> Acc (Scalar Int) -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) a -> Acc (Matrix a)
 jacobian2l' k l (sw, sh, sw', sh', sw'', sh'', f, _) (PCons _ _ a PNil) (PCons _ _ b PNil) = 
   let
-    i = index2 (lift k) (lift l)
+    i = index2 (the k) (the l)
     a' = A.map (lift1 fromValue) a
     b' = A.map (lift1 fromValue) b
     a'' = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) a'
   in
     A.map (lift1 derivative) (f a'' b')
 
-jacobian2r' :: (A.Num a) => Int -> Int -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) a -> Acc (Matrix a)
+jacobian2r' :: (A.Num a) => Acc (Scalar Int) -> Acc (Scalar Int) -> BinaryFunction (ValueAndDerivative a) w h w' h' w'' h'' -> PList ('(w, h) ': '[]) a -> PList ('(w', h') ': '[]) a -> Acc (Matrix a)
 jacobian2r' k l (sw, sh, sw', sh', sw'', sh'', f, _) (PCons _ _ a PNil) (PCons _ _ b PNil) = 
   let
-    i = index2 (lift k) (lift l)
+    i = index2 (the k) (the l)
     a' = A.map (lift1 fromValue) a
     b' = A.map (lift1 fromValue) b
     b'' = A.imap (\j v -> cond (unindex2 j A.== unindex2 i) (lift $ ValueAndDerivative (value v) 1) v) b'
@@ -386,7 +385,7 @@ toFGL'' :: DynGraph gr => NeuralNetwork e l w i ps po s o -> gr Label Label
 toFGL'' = toFGL' empty
 
 expVal :: Sing (n :: Nat) -> Exp Int
-expVal sn = fromInteger $ withKnownNat sn $ natVal sn
+expVal sn = the $ unit $ constant $ fromInteger $ withKnownNat sn $ natVal sn
 
 intVal :: Sing (n :: Nat) -> Int
 intVal sn = fromInteger $ withKnownNat sn $ natVal sn
@@ -507,7 +506,7 @@ pSize sl =
 pExtend :: (A.Num e) => Sing l -> AtIndex l '(1, os) 0 -> PList ('(1, os) ': '[]) e -> PList l e
 pExtend sl p e =
   let
-    a = A.fill (index1 $ lift $ pSize sl) 0
+    a = A.fill (index1 $ the $ unit $ constant $ pSize sl) 0
     pl = unflatten sl a
   in
     pAdd p pl e
@@ -584,7 +583,7 @@ gradientParams x y sis sos nn =
       let
         sp = (sw %:++ ss %:++ so)
         dp = fromSing sp
-        np = Prelude.map (index1 . lift) ([0..(fromInteger (foldl (\r (a, b) -> (r + a*b)) 0 dp)-1)] :: [Int])
+        np = Prelude.map (index1 . the . unit. constant) ([0..(fromInteger (foldl (\r (a, b) -> (r + a*b)) 0 dp)-1)] :: [Int])
         p = NeuralNetwork2.flatten $ NeuralNetwork2.init x sp
         mp = Prelude.map (\i -> A.imap (\j v -> cond (unindex1 j A.== unindex1 i) y v) p) np
       in
@@ -612,7 +611,7 @@ gradient2 sis sos nn f i p =
         (pw, pso) = pSplit sw (ss %:++ so) pl
         (ps, po) = pSplit ss so pso
         v = evalForwardL sl nn' pw pi ps po
-        j = Prelude.map (\a -> pCons s1 sos (traceShow (I.run a) a) PNil) $ jacobianl sos f (Prelude.map (\l -> pCons s1 sos (pAt q2 l) PNil) v)
+        j = Prelude.map (\a -> pCons s1 sos a PNil) $ jacobianl sos f (Prelude.map (\l -> pCons s1 sos (pAt q2 l) PNil) v)
         g = evalBackwardL sl q2 nn' v j (NeuralNetwork2.init 0 ss) (NeuralNetwork2.init 0 so)
         (w', ps', po', _, _) = keepParams nn' g
       in
@@ -680,14 +679,15 @@ initParams :: (Prelude.Floating e, A.Floating e, Lift Exp e, e ~ Plain e) => e -
 initParams x nn =
   case nn of
     SomeNeuralNetwork q1 q2 sl sw si ss so nn' ->
-      NeuralNetwork2.flatten $ NeuralNetwork2.init (lift x) (sw %:++ si %:++ ss)
+      NeuralNetwork2.flatten $ NeuralNetwork2.init (the $ unit $ constant x) (sw %:++ si %:++ ss)
+
 gradientDescent :: forall e is os . (Prelude.Floating e, A.Floating e, Lift Exp e, e ~ Plain e) => e -> Sing is -> Sing os -> SomeNeuralNetwork e is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector e)] -> Acc (Vector e) -> [Acc (Vector e)]
 gradientDescent eta sis sos nn f i p =
   let
     g = gradient2 sis sos nn f i p
-    p' = safeZipWith1 (updateParam (lift eta)) p g
+    p' = safeZipWith1 (updateParam (the $ unit $ constant $ eta)) p g
   in
-    Prelude.reverse $ p':(gradientDescent eta sis sos nn f i p')
+    p':(gradientDescent eta sis sos nn f i p')
   where
     updateParam :: Exp e -> Exp e -> Exp e -> Exp e
     updateParam eta p g = p - eta * g
