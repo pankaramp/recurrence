@@ -29,5 +29,5 @@ main =
     do
       writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn2 :: Gr Label Label))
       --print $ run $ A.zipWith (A.-) (gradient2 s1 s1 nn2 e (Prelude.map NeuralNetwork2.flatten i)) (gradient s1 s1 nn e (Prelude.map NeuralNetwork2.flatten i))
-      print $ show $ run $ Prelude.last $ Prelude.take 3 $ gradientDescent 0.05 s1 s1 nn2 e (Prelude.map NeuralNetwork2.flatten i) (NeuralNetwork2.initParams 0.5 nn2)
+      print $ show $ Prelude.last $ Prelude.take 20 $ gradientDescent 0.05 s1 s1 nn2 e (Prelude.map NeuralNetwork2.flatten i) (NeuralNetwork2.initParams 0.5 nn2)
       --print $ show $ forward s1 s1 nn2 e (NeuralNetwork2.initParams 0.5 nn2) (Prelude.map NeuralNetwork2.flatten i)
