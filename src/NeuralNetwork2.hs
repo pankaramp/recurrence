@@ -519,18 +519,32 @@ evalBackwardL sl p nn i a ps po = foldr step (NeuralNetwork2.init 0 sl) (Prelude
             (_, ps, po, _, _) = keepParams nn adj
             adj' = pExtend sl p aa
             adj'' = copyParams nn ps po adj'
-            adj''' = evalBackward sl nn ii adj''
+            adj''' = NeuralNetwork2.unflatten sl $ A.use $ trace "backward" $ run1 step' $ B.run $ NeuralNetwork2.flatten $ pJoin ii adj''
           in
             adj'''
+        step' x =
+          let
+            pp = NeuralNetwork2.unflatten (sl %:++ sl) x
+            (pi, pa) = pSplit sl sl pp
+          in
+            NeuralNetwork2.flatten $ evalBackward sl nn pi pa
 
 evalForwardL :: forall e l s o i w . (A.Num e) => Sing l -> Sing s -> Sing o -> Sing i -> NeuralNetwork (ValueAndDerivative e) l w i s o s o -> PList w e -> [PList i e] -> PList s e -> PList o e -> [PList l e]
-evalForwardL sl sings singo singi nn w i s o = Prelude.fst $ foldl' step ([], (s, o)) i
+evalForwardL sl sngs sngo sngi nn w i s o = Prelude.fst $ foldl' step ([], (s, o)) i
   where step (r, (ss, oo)) ii =
           let
-            r' = evalForward sl nn w ii ss oo
+            r' = NeuralNetwork2.unflatten sl $ A.use $ trace "forward" $ run1 step' $ B.run $ NeuralNetwork2.flatten $ pJoin ss $ pJoin oo ii
             (_, _, _, s', o') = keepParams nn r'
           in
             (r' : r, (s', o'))
+        step' x =
+          let
+            p = NeuralNetwork2.unflatten (sngs %:++ sngo %:++ sngi) x
+            (ps, poi) = pSplit sngs (sngo %:++ sngi) p
+            (po, pi) = pSplit sngo sngi poi
+          in
+            NeuralNetwork2.flatten $ evalForward sl nn w pi ps po
+        
 
 evalForward :: (A.Num e) => Sing l -> NeuralNetwork (ValueAndDerivative e) l w i ps po s o -> PList w e -> PList i e -> PList ps e -> PList po e -> PList l e
 evalForward sl (Unity w h) PNil PNil PNil PNil = pCons w h (generate (index2 (expVal w) (expVal h)) (\_ -> 1)) PNil
@@ -686,7 +700,7 @@ infList :: (a -> a) -> a -> [a]
 infList f i = i:(infList f (f i))
 
 gradientDescent :: forall e is os . (Prelude.Floating e, A.Floating e, Lift Exp e, e ~ Plain e) => e -> Sing is -> Sing os -> SomeNeuralNetwork e is os -> ([PList ('(1, os) ': '[]) (ValueAndDerivative e)] -> Acc (Scalar (ValueAndDerivative e))) -> [Acc (Vector e)] -> Vector e -> [(Vector e)]
-gradientDescent eta sis sos nn f i p = infList (trace "step" . (run1 step)) p
+gradientDescent eta sis sos nn f i p = infList (trace "forward" . run1 step) p
   where
     updateParam :: Exp e -> Exp e -> Exp e -> Exp e
     updateParam eta p g = p - eta * g
@@ -697,6 +711,3 @@ gradientDescent eta sis sos nn f i p = infList (trace "step" . (run1 step)) p
         p' = safeZipWith1 (updateParam (the $ unit $ constant $ eta)) p g
       in
         p'
-            
-            
-          
