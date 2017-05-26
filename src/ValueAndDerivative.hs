@@ -13,6 +13,9 @@ type instance EltRepr (ValueAndDerivative e) = EltRepr (e, e)
 data ValueAndDerivative e = ValueAndDerivative e e
   deriving (Typeable, Show, P.Eq)
 
+withDerivative :: forall e . (Elt e) => Exp e -> Exp (ValueAndDerivative e) -> Exp (ValueAndDerivative e)
+withDerivative d v = let (ValueAndDerivative x (_ :: Exp e)) = unlift v in lift $ ValueAndDerivative x d
+
 derivative :: forall e . (Elt e) => Exp (ValueAndDerivative e) -> Exp e
 derivative e = let (ValueAndDerivative (_ :: Exp e) x) = unlift e in x
 
