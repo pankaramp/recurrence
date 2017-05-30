@@ -113,41 +113,6 @@ timesJacobian2 f a1 a2 b = (r1, r2)
   where f' [a1, a2] = f a1 a2
         [r1, r2] = timesJacobianL f' [a1, a2] b
 
---safeZipWith1 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Vector a) -> Acc (Vector b) -> Acc (Vector c)
---safeZipWith1 = A.zipWith
-
-{-safeZipWith2 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Matrix a) -> Acc (Matrix b) -> Acc (Matrix c)
-safeZipWith2 = A.zipWith
-
-safeZipWith3 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Array DIM3 a) -> Acc (Array DIM3 b) -> Acc (Array DIM3 c)
-safeZipWith3 = A.zipWith
-
-safeZipWith1 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Vector a) -> Acc (Vector b) -> Acc (Vector c)
-safeZipWith1 f a b =
-  let
-    a' = A.use $ B.run a
-    b' = A.use $ B.run b
-    x = B.run $ unit $ unindex1 $ shape a'
-    y = B.run $ unit $ unindex1 $ shape b'
-  in
-    if (x Prelude.== y) then (A.zipWith f a b) else error $ "invalid bounds: " Prelude.++ (show $ B.run $ unit $ shape a') Prelude.++ ", " Prelude.++ (show $ B.run $ unit $ shape b')
-
-safeZipWith2 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Matrix a) -> Acc (Matrix b) -> Acc (Matrix c)
-safeZipWith2 f a b =
-  let
-    x = I.run $ unit $ unindex2 $ shape a
-    y = I.run $ unit $ unindex2 $ shape b
-  in
-    if (x Prelude.== y) then (A.zipWith f a b) else error $ "invalid bounds: " Prelude.++ (show $ I.run $ unit $ shape a) Prelude.++ ", " Prelude.++ (show $ I.run $ unit $ shape b)
-
-safeZipWith3 :: (Elt a, Elt b, Elt c) => (Exp a -> Exp b -> Exp c) -> Acc (Array DIM3 a) -> Acc (Array DIM3 b) -> Acc (Array DIM3 c)
-safeZipWith3 f a b =
-  let
-    x = I.run $ unit $ unindex3 $ shape a
-    y = I.run $ unit $ unindex3 $ shape b
-  in
-    if (x Prelude.== y) then (A.zipWith f a b) else error $ "invalid bounds: " Prelude.++ (show $ I.run $ unit $ shape a) Prelude.++ ", " Prelude.++ (show $ I.run $ unit $ shape b)
--}
 data AtIndexNat (l :: [Nat]) (e :: Nat) (i :: Nat) where
   HeadNat :: AtIndexNat (x ': xs) x 0
   TailNat :: AtIndexNat t x i -> AtIndexNat (h ': t) x (i + 1)
@@ -807,7 +772,7 @@ infList :: (a -> a) -> a -> [a]
 infList f i = i:(infList f (f i))
 
 gradientDescent :: forall e is os . (Prelude.Floating e, A.Floating e, Lift Exp e, e ~ Plain e) => e -> Sing is -> Sing os -> SomeNeuralNetwork e is os -> ([Acc (Array DIM4 (ValueAndDerivative e))] -> Acc (Matrix (ValueAndDerivative e))) -> [Acc (Vector e)] -> Vector e -> [(Vector e)]
-gradientDescent eta sis sos nn f i p = infList (\a -> trace "gradient" $ B.run $ step $ A.use a) p
+gradientDescent eta sis sos nn f i p = infList (\a -> trace "gradient" $ B.run1 step a) p
   where
     updateParam :: Exp e -> Exp e -> Exp e -> Exp e
     updateParam eta p g = p - eta * g
