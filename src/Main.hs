@@ -23,16 +23,13 @@ main =
     ir = [1, 1.1, 1.2]
     or = fmap Prelude.sin ir
     ia = (Prelude.map (A.use . A.fromList (Z:.1:.1) . (: [])) ir) :: [Acc (Matrix (Double))]
-    oa = (A.map fromValue $ A.use $ A.fromList (Z:.(Prelude.length or)) or) :: Acc (Vector (ValueAndDerivative Double))
-    i = Prelude.map (\a -> pSingleton s1 s1 a) ia
-    f = (\(PList _ a ) -> reshape (index1 1) $ A.sum a) :: PList ('(1, 1) ': '[]) (ValueAndDerivative Double) -> Acc (Vector (ValueAndDerivative Double))
-    f' = (A.sum . Prelude.foldr (A.++) (A.use $ A.fromList (Z:.0) [])) . (Prelude.map (\(PList _ a) -> reshape (index1 1) $ A.sum a)) :: [PList ('(1, 1) ': '[]) Double] -> Acc (Scalar Double)
-    e = (A.map (\a -> a / (constant $ Prelude.fromIntegral $ Prelude.length or)) . A.sum . A.zipWith (\a b -> (a A.- b) * (a A.- b)) oa) . (Prelude.foldr (A.++) (A.use $ A.fromList (Z:.0) [])) . (Prelude.map f)
+    oa = Prelude.map (A.map fromValue . A.use . A.fromList (Z:.1:.1) . (\a -> a : [])) or ::[Acc (Matrix (ValueAndDerivative Double))]
+    i = Prelude.map (\a -> pSingleton2 s1 s1 a) ia
     s1 = sing :: SNat 1
     nn2 = makeNetwork s1 (SNil) s1 :: SomeNeuralNetwork Double 1 1
 --    nn = makeNetwork s1 (SNil) s1 :: SomeNeuralNetwork (ValueAndDerivative Double) 1 1
     --p = forwardParams (lift (1.01 :: Double)) s1 s1 nn
-    p = Prelude.last $ Prelude.take 3 $ gradientDescent 0.05 s1 s1 nn2 e (Prelude.map (\(PList _ a) -> a) i) (NeuralNetwork2.initParams 0.5 nn2)
+    p = Prelude.last $ Prelude.take 3 $ gradientDescent 0.05 s1 s1 nn2 (mse oa) (Prelude.map pFlatten i) (NeuralNetwork2.initParams 0.5 nn2)
 --    out = 
   in
     do
@@ -40,6 +37,6 @@ main =
       registerGcMetrics store -- optional
       server <- forkServerWith store "localhost" 8001
       writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn2 :: Gr Label Label))
-      --print $ run $ A.zipWith (A.-) (gradient2 s1 s1 nn2 e (Prelude.map NeuralNetwork2.flatten i)) (gradient s1 s1 nn e (Prelude.map NeuralNetwork2.flatten i))
+      --print $ run $ A.zipWith (A.-) (gradient2 s1 s1 nn2 e (Prelude.map NeuralNetwork2.pFlatten i)) (gradient s1 s1 nn2 e (Prelude.map NeuralNetwork2.pFlatten i))
       print $ show $ p --forward s1 s1 nn2 f' (use p) (Prelude.map (\(PList _ a) -> a) i)
       --print $ show $ forward s1 s1 nn2 e (NeuralNetwork2.initParams 0.5 nn2) (Prelude.map NeuralNetwork2.flatten i)
