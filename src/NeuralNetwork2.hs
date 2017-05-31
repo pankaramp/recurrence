@@ -55,6 +55,13 @@ singleton a =
   in
     A.reshape (lift $ Z:.(1 :: Exp Int):.(1 :: Exp Int):.w:.h) a
 
+singleton' :: (Elt e) => Acc (Matrix e) -> Acc (Array DIM4 e)
+singleton' a =
+  let
+    Z :. w :. h = unlift $ shape a :: Z :. Exp Int :. Exp Int
+  in
+    A.reshape (lift $ Z:.w:.h:.(1 :: Exp Int):.(1 :: Exp Int)) a
+
 pFlatten :: (Elt e) => PList l e -> Acc (Vector e)
 pFlatten PNil = A.use $ A.fromList (Z:.0) []
 pFlatten (PCons _ _ a pt) = (A.flatten a) A.++ (pFlatten pt)
@@ -105,7 +112,7 @@ timesJacobianL f as b = Prelude.map (\(f, a) -> timesJacobian1 f a b) $ Prelude.
   where fs = mapApplyExcept f $ Prelude.map (singleton . A.map fromValue) as
 
 timesJacobianL' :: (A.Num e) => ([Acc (Array DIM4 (ValueAndDerivative e))] -> Acc (Array DIM4 (ValueAndDerivative e))) -> [Acc (Matrix e)] -> Acc (Matrix e) -> [Acc (Matrix e)]
-timesJacobianL' f as b = Prelude.map (\(f, a) -> A.use $ B.run $ (\a -> timesJacobian1 f a b) a) $ Prelude.zip fs as
+timesJacobianL' f as b = Prelude.map (\(f, a) -> A.use $ B.run1 (\c -> timesJacobian1 f c b) $ B.run a) $ Prelude.zip fs as
   where fs = mapApplyExcept f $ Prelude.map (singleton . A.map fromValue) as
 
 timesJacobian2 :: (A.Num e) => (Acc (Array DIM4 (ValueAndDerivative e)) -> Acc (Array DIM4 (ValueAndDerivative e)) -> Acc (Array DIM4 (ValueAndDerivative e))) -> Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e) -> (Acc (Matrix e), Acc (Matrix e))
@@ -228,8 +235,8 @@ eprod :: (A.Num e) => SNat w -> SNat h -> BinaryFunction e w h w h w h
 eprod sw sh = (sw, sh, sw, sh, sw, sh, A.zipWith (*), Label ".*")
 
 matchArgs a b = (a', b')
-  where Z :. w  :. h  :. k :. l = unlift (shape a)    :: Z :. Exp Int :. Exp Int :. Exp Int :. Exp Int
-        Z :. w' :. h' :. m :. n = unlift (shape b)    :: Z :. Exp Int :. Exp Int :. Exp Int :. Exp Int
+  where Z :. w  :. h  :. k :. l = unlift (shape a) :: Z :. Exp Int :. Exp Int :. Exp Int :. Exp Int
+        Z :. w' :. h' :. m :. n = unlift (shape b) :: Z :. Exp Int :. Exp Int :. Exp Int :. Exp Int
         a' = acond (w  A.* h  A.== 1) (A.replicate (lift $ Z :. w' :. h' :. All :. All) $ A.reshape (lift $ Z :. k :. l) a) a
         b' = acond (w' A.* h' A.== 1) (A.replicate (lift $ Z :. w  :. h  :. All :. All) $ A.reshape (lift $ Z :. m :. n) b) b
 
@@ -695,7 +702,8 @@ gradient2 sis sos nn f i p =
         (pw, pso) = pSplit sw (ss %:++ so) pl
         (ps, po) = pSplit ss so pso
         v = evalForwardL sl ss so si nn' pw pi ps po
-        adj = Prelude.map (\a -> pSingleton2 s1 sos $ a) $ timesJacobianL' (singleton . f) (Prelude.map (\l -> pAt2 q2 l) v) $ A.reshape (index2 1 1) $ A.unit 1
+        err = A.map value $ A.reshape (lift $ Z) $ f $ Prelude.map (singleton . A.map fromValue . pAt2 q2) v
+        adj = Prelude.map (pSingleton2 s1 sos) $ timesJacobianL' (singleton' . f) (Prelude.map (pAt2 q2) v) $ A.reshape (index2 1 1) $ err
         g = evalBackwardL sl sos q2 nn' v adj
         (w', ps', po', _, _) = keepParams nn' g
         rw = pFlatten $ w'
@@ -732,6 +740,19 @@ forward sis sos nn f p i =
         r = evalForwardL sl ss so si nn' pw pi ps po        
       in
         f $ Prelude.map (\rr -> pSingleton2 (sing ::SNat 1) sos (pAt2 q2 rr)) r
+
+forward' :: Sing is -> Sing os -> SomeNeuralNetwork e is os -> Acc (Vector e) -> [Acc (Vector e)] -> [Acc (Matrix e)]
+forward' sis sos nn p i =
+  case nn of
+    SomeNeuralNetwork q1 q2 sl sw si ss so nn' ->
+      let
+        pl = pUnflatten (sw %:++ ss %:++ so) p
+        pi = Prelude.map (pUnflatten si) i
+        (pw, pso) = pSplit sw (ss %:++ so) pl
+        (ps, po) = pSplit ss so pso
+        r = evalForwardL sl ss so si nn' pw pi ps po        
+      in
+        Prelude.map (pAt2 q2) r
 
 toFGL :: DynGraph gr => SomeNeuralNetwork e i o -> gr Label Label
 toFGL nn = case nn of
@@ -772,7 +793,7 @@ infList :: (a -> a) -> a -> [a]
 infList f i = i:(infList f (f i))
 
 gradientDescent :: forall e is os . (Prelude.Floating e, A.Floating e, Lift Exp e, e ~ Plain e) => e -> Sing is -> Sing os -> SomeNeuralNetwork e is os -> ([Acc (Array DIM4 (ValueAndDerivative e))] -> Acc (Matrix (ValueAndDerivative e))) -> [Acc (Vector e)] -> Vector e -> [(Vector e)]
-gradientDescent eta sis sos nn f i p = infList (\a -> trace "gradient" $ B.run1 step a) p
+gradientDescent eta sis sos nn f i p = infList (\a -> trace "gradient" $ B.run $ step $ A.use a) p
   where
     updateParam :: Exp e -> Exp e -> Exp e -> Exp e
     updateParam eta p g = p - eta * g
