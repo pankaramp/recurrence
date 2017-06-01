@@ -1,0 +1,14 @@
+flags: {}
+extra-package-dbs: []
+packages:
+- '.'
+extra-deps:
+- accelerate-1.0.0.0
+- accelerate-llvm-1.0.0.0
+- accelerate-llvm-native-1.0.0.0
+- chaselev-deque-0.5.0.5
+- dotgen-0.4.2
+- fgl-visualize-0.1.0.1
+- linear-accelerate-0.3
+- llvm-hs-4.0.1.0
+resolver: lts-8.16

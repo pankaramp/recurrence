@@ -20,7 +20,7 @@ import System.Remote.Monitoring
 main :: IO ()
 main =
   let
-    ir = [1, 1.1.. 3.0]
+    ir = [1, 1.1.. 1.1]
     or = fmap Prelude.sin ir
     ia = (Prelude.map (A.use . A.fromList (Z:.1:.1) . (: [])) ir) :: [Acc (Matrix (Double))]
     oa = Prelude.map (A.map fromValue . A.use . A.fromList (Z:.1:.1) . (\a -> a : [])) or ::[Acc (Matrix (ValueAndDerivative Double))]
@@ -30,7 +30,7 @@ main =
     nn2 = makeNetwork s1 (SCons s5 SNil) s1 :: SomeNeuralNetwork Double 1 1
 --    nn = makeNetwork s1 (SNil) s1 :: SomeNeuralNetwork (ValueAndDerivative Double) 1 1
     --p = forwardParams (lift (1.01 :: Double)) s1 s1 nn
-    p = Prelude.last $ Prelude.take 5 $ gradientDescent 0.05 s1 s1 nn2 (mse oa) (Prelude.map pFlatten i) (NeuralNetwork2.initParams 0.5 nn2)
+    p = Prelude.last $ Prelude.take 2 $ gradientDescent 0.05 s1 s1 nn2 (mse oa) (Prelude.map pFlatten i) (NeuralNetwork2.initParams 0.5 nn2)
 --    out = 
   in
     do

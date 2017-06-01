@@ -23,10 +23,10 @@ import Data.Typeable
 import Data.Array.Accelerate as A
 import Data.List
 import ValueAndDerivative
---import Debug.Trace
+import Debug.Trace
 
-trace _ = id
-traceShow _ = id
+--trace _ = id
+--traceShow _ = id
 
 mse :: (A.Num e) => [Acc (Matrix e)] -> [Acc (Array DIM4 e)] -> Acc (Array DIM2 e)
 mse t o = A.fold (A.+) 0 $ A.fold (A.+) 0 $ Prelude.foldl1 (A.zipWith (A.+)) s
@@ -112,7 +112,7 @@ timesJacobianL f as b = Prelude.map (\(f, a) -> timesJacobian1 f a b) $ Prelude.
   where fs = mapApplyExcept f $ Prelude.map (singleton . A.map fromValue) as
 
 timesJacobianL' :: (A.Num e) => ([Acc (Array DIM4 (ValueAndDerivative e))] -> Acc (Array DIM4 (ValueAndDerivative e))) -> [Acc (Matrix e)] -> Acc (Matrix e) -> [Acc (Matrix e)]
-timesJacobianL' f as b = Prelude.map (\(f, a) -> A.use $ B.run1 (\c -> timesJacobian1 f c b) $ B.run a) $ Prelude.zip fs as
+timesJacobianL' f as b = Prelude.map (\(f, a) -> A.use $ B.run1 (\x -> let (b, c) = unlift x in timesJacobian1 f c b) $ (B.run a, B.run b)) $ Prelude.zip fs as
   where fs = mapApplyExcept f $ Prelude.map (singleton . A.map fromValue) as
 
 timesJacobian2 :: (A.Num e) => (Acc (Array DIM4 (ValueAndDerivative e)) -> Acc (Array DIM4 (ValueAndDerivative e)) -> Acc (Array DIM4 (ValueAndDerivative e))) -> Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e) -> (Acc (Matrix e), Acc (Matrix e))
@@ -588,14 +588,17 @@ pExtend sl p e =
     pAdd p pl e
 
 evalBackwardL :: forall e l os w i s o . (A.Floating e) => Sing l -> SNat os -> AtIndex l '(1, os) 0 -> NeuralNetwork (ValueAndDerivative e) l w i s o s o -> [PList l e] -> [PList ('(1, os) ': '[]) e] -> PList l e
-evalBackwardL sl sos p nn i a = pUnflatten sl $ A.use $ foldr (\a b -> B.run1 (trace "backward" . step) (B.run ((A.use b) A.++ (A.use a)))) z args
+evalBackwardL sl sos p nn i a = pUnflatten sl $ A.use $ foldr (\a b -> B.run1 (trace "backward" . step) (b, a)) z args
   where sa = SCons (STuple2 (sing :: SNat 1) sos) SNil
         z = B.run $ pFlatten $ NeuralNetwork2.init 0 sl
-        args = Prelude.map (B.run . pFlatten) $ Prelude.zipWith (pJoin) i a
+        args = Prelude.zip (Prelude.map (B.run . pFlatten) i) (Prelude.map (B.run . pFlatten) a)
         step x =
           let
-            (adj, ia) = pSplit sl (sl %:++ sa) $ pUnflatten (sl %:++ sl %:++ sa) $ x
-            (ii, aa) = pSplit sl sa ia
+            (adjj, y) = unlift x :: (Acc (Vector e), Acc (Vector e, Vector e))
+            (ii', aa') = unlift y
+            adj = pUnflatten sl adjj
+            ii = pUnflatten sl ii'
+            aa = pUnflatten sa aa'
             adj' = pExtend sl p aa
             (pw, ps, po, _, _) = keepParams nn adj
             adj'' = copyParams nn pw ps po adj'
@@ -604,22 +607,22 @@ evalBackwardL sl sos p nn i a = pUnflatten sl $ A.use $ foldr (\a b -> B.run1 (t
             r
 
 evalForwardL :: forall e l s o i w . (A.Num e) => Sing l -> Sing s -> Sing o -> Sing i -> NeuralNetwork (ValueAndDerivative e) l w i s o s o -> PList w e -> [PList i e] -> PList s e -> PList o e -> [PList l e]
-evalForwardL sl sngs sngo sngi nn w i s o = Prelude.fst $ foldl' step ([], (s, o)) i
+evalForwardL sl sngs sngo sngi nn w i s o = Prelude.fst $ foldl' step ([], (B.run $ pFlatten s, B.run $ pFlatten o)) (Prelude.map (B.run . pFlatten) i)
   where step (r, (s, o)) i =
           let
-            x = pFlatten $ pJoin s (pJoin o i)
-            r' = pUnflatten sl $  A.use $ B.run1 (trace "forward" . step') $ B.run x
-            (_, _, _, s', o') = keepParams nn r'
+            (r', s', o') = B.run1 (trace "forward" . step') (s, o, i)
           in
-            (r' : r, (s', o'))
-        step' x =
+            ((pUnflatten sl $ A.use r') : r, (s', o'))
+        step' x =          
           let
-            p = pUnflatten (sngs %:++ sngo %:++ sngi) x
-            (ps, poi) = pSplit sngs (sngo %:++ sngi) p
-            (po, pi) = pSplit sngo sngi poi            
-            r = pFlatten $ evalForward sl nn w pi ps po
+            (s, o, i) = unlift x
+            ps = pUnflatten sngs s
+            po = pUnflatten sngo o
+            pi = pUnflatten sngi i
+            r = evalForward sl nn w pi ps po
+            (_, _, _, s', o') = keepParams nn r
           in
-            r
+            lift (pFlatten r, pFlatten s', pFlatten o')
 
 evalForward :: (A.Num e) => Sing l -> NeuralNetwork (ValueAndDerivative e) l w i ps po s o -> PList w e -> PList i e -> PList ps e -> PList po e -> PList l e
 evalForward sl (Unity w h) _ _ _ _ = pSingleton2 w h (generate (index2 (expVal w) (expVal h)) (\_ -> 1))
@@ -737,7 +740,7 @@ forward sis sos nn f p i =
         pi = Prelude.map (pUnflatten si) i
         (pw, pso) = pSplit sw (ss %:++ so) pl
         (ps, po) = pSplit ss so pso
-        r = evalForwardL sl ss so si nn' pw pi ps po        
+        r = evalForwardL sl ss so si nn' pw pi ps po
       in
         f $ Prelude.map (\rr -> pSingleton2 (sing ::SNat 1) sos (pAt2 q2 rr)) r
 
