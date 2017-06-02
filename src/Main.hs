@@ -34,9 +34,9 @@ main =
 --    out = 
   in
     do
-      store <- initAccMetrics
-      registerGcMetrics store -- optional
-      server <- forkServerWith store "localhost" 8001
+--      store <- initAccMetrics
+--      registerGcMetrics store -- optional
+--      server <- forkServerWith store "localhost" 8001
       writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn2 :: Gr Label Label))
       --print $ run $ A.zipWith (A.-) (gradient2 s1 s1 nn2 e (Prelude.map NeuralNetwork2.pFlatten i)) (gradient s1 s1 nn2 e (Prelude.map NeuralNetwork2.pFlatten i))
       print $ show $ forward' s1 s1 nn2 (use p) (Prelude.map pFlatten i)

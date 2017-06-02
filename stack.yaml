@@ -1,4 +1,7 @@
-flags: {}
+flags:
+  accelerate:
+    debug: true
+    ekg: true
 extra-package-dbs: []
 packages:
 - '.'
