@@ -12,6 +12,7 @@ import GHC.TypeLits
 import Data.Singletons.TypeLits
 import Data.Singletons.Prelude.List
 import ValueAndDerivative
+import Debug.Trace
 
 import Data.Array.Accelerate.Debug
 import System.Metrics
@@ -39,5 +40,5 @@ main =
 --      server <- forkServerWith store "localhost" 8001
       writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn2 :: Gr Label Label))
       --print $ run $ A.zipWith (A.-) (gradient2 s1 s1 nn2 e (Prelude.map NeuralNetwork2.pFlatten i)) (gradient s1 s1 nn2 e (Prelude.map NeuralNetwork2.pFlatten i))
-      print $ show $ forward' s1 s1 nn2 (use p) (Prelude.map pFlatten i)
+      mapM_ (print . (Debug.Trace.trace "run") . run) $ forward' s1 s1 nn2 (use p) (Prelude.map pFlatten i)
       --print $ show $ forward s1 s1 nn2 e (NeuralNetwork2.initParams 0.5 nn2) (Prelude.map NeuralNetwork2.flatten i)
