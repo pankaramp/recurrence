@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, KindSignatures, TypeOperators, GADTs, TemplateHaskell, TypeFamilies, UndecidableInstances, Rank2Types, AllowAmbiguousTypes, ScopedTypeVariables, MultiParamTypeClasses, FlexibleInstances, FlexibleContexts, PolyKinds #-}
+{-# LANGUAGE DataKinds, KindSignatures, TypeOperators, GADTs, TemplateHaskell, TypeFamilies, UndecidableInstances, Rank2Types, AllowAmbiguousTypes, ScopedTypeVariables, MultiParamTypeClasses, FlexibleInstances, FlexibleContexts, PolyKinds, BangPatterns #-}
 {-# OPTIONS_GHC -fplugin=GHC.TypeLits.Normalise #-}
 
 module NeuralNetwork2 where
@@ -39,7 +39,6 @@ mse t o = A.fold (A.+) 0 $ A.fold (A.+) 0 $ Prelude.foldl1 (A.zipWith (A.+)) s
             t' = A.replicate (lift $ Z :. w :. h :. All :. All) t
           in
             A.zipWith (-) t' o
-  
 
 unsingleton :: (Elt e) => Acc (Array DIM4 e) -> Acc (Matrix e)
 unsingleton a =
@@ -89,7 +88,7 @@ jacobian f a = b'
         b' = A.map derivative b
 
 timesJacobian1 :: (A.Num e) => (Acc (Array DIM4 (ValueAndDerivative e)) -> Acc (Array DIM4 (ValueAndDerivative e))) -> Acc (Matrix e) -> Acc (Matrix e) -> Acc (Matrix e)
-timesJacobian1 f v t = r
+timesJacobian1 f !v !t = seq r r
   where Z:. w :. h = unlift $ shape v :: Z :. Exp Int :. Exp Int
         Z:. w' :. h' = unlift $ shape t :: Z :. Exp Int :. Exp Int
         t' = A.replicate (lift $ Z :. w :. h :. All :. All) t
@@ -132,7 +131,7 @@ type Matrix e = Array DIM2 e
 
 data PList (l :: [(Nat, Nat)]) e where
   PNil :: PList '[] e
-  PCons :: Sing w -> Sing h -> Acc (Matrix e) -> PList l e -> PList ('(w, h) ': l) e
+  PCons :: Sing w -> Sing h -> !(Acc (Matrix e)) -> !(PList l e) -> PList ('(w, h) ': l) e
 
 pNil :: (A.Elt e) => PList '[] e
 pNil = PNil
@@ -529,32 +528,32 @@ data SomeSNat where
   SomeSNat :: forall n . SNat n -> SomeSNat
 
 evalBackward :: (A.Num e) => Sing l -> NeuralNetwork (ValueAndDerivative e) l w i ps po s o -> PList l e -> PList l e -> PList l e
-evalBackward sl (Unity w h) v adj = adj
-evalBackward sl (Weight w h) v adj = adj
-evalBackward sl (Input w h) v adj = adj
-evalBackward sl (PreviousState w h) v adj = adj
-evalBackward sl (PreviousOutput w h) v adj = adj
-evalBackward (SCons _ sl) (State p nn i w h) v adj =
+evalBackward sl (Unity w h) !v !adj = adj
+evalBackward sl (Weight w h) !v !adj = adj
+evalBackward sl (Input w h) !v !adj = adj
+evalBackward sl (PreviousState w h) !v !adj = adj
+evalBackward sl (PreviousOutput w h) !v !adj = adj
+evalBackward (SCons _ sl) (State p nn i w h) !v !adj =
   let
     (adjh, adjt) = pUncons adj
     adjS' = pAdd p adjt adjh
   in
-    pCons adjh $ evalBackward sl nn (pTail v) adjS'
-evalBackward (SCons _ sl) (Output p nn i w h) v adj =
+    pCons adjh $! evalBackward sl nn (pTail v) adjS'
+evalBackward (SCons _ sl) (Output p nn i w h) !v !adj =
   let
     (adjh, adjt) = pUncons adj
     adjO' = pAdd p adjt adjh
   in
-    pCons adjh $ evalBackward sl nn (pTail v) adjO'
-evalBackward sl (Union nn1 sl1 sw1 si1 sps1 spo1 _ ss1 nn2 sl2 sw2 si2 sps2 spo2 _ _) v adj =
+    pCons adjh $! evalBackward sl nn (pTail v) adjO'
+evalBackward sl (Union nn1 sl1 sw1 si1 sps1 spo1 _ ss1 nn2 sl2 sw2 si2 sps2 spo2 _ _) !v !adj =
   let
     (adj1, adj2) = pSplit sl1 sl2 adj
     (v1, v2) = pSplit sl1 sl2 v
-    adj1' = evalBackward sl1 nn1 v1 adj1
-    adj2' = evalBackward sl2 nn2 v2 adj2
+    adj1' = id $! evalBackward sl1 nn1 v1 adj1
+    adj2' = id $! evalBackward sl2 nn2 v2 adj2
   in
     pJoin adj1' adj2'
-evalBackward (SCons _ sl) (Unary p nn i w h ff@(_, _, w', h', f, l)) v adj =
+evalBackward (SCons _ sl) (Unary p nn i w h ff@(_, _, w', h', f, l)) !v !adj =
   let
     (adjh, adjt) = pUncons adj
     (_, _, a) = pBreak2 adjh
@@ -562,8 +561,8 @@ evalBackward (SCons _ sl) (Unary p nn i w h ff@(_, _, w', h', f, l)) v adj =
     x = timesJacobian1 f (pAt2 p vt) a
     adjU = pAdd p adjt $ pSingleton2 w h x
   in
-    pCons adjh $ evalBackward sl nn vt adjU
-evalBackward (SCons _ sl) (Binary p q nn i w h j w' h' ff@(_, _, _, _, w'', h'', f,  l)) v adj =
+    pCons adjh $! evalBackward sl nn vt adjU
+evalBackward (SCons _ sl) (Binary p q nn i w h j w' h' ff@(_, _, _, _, w'', h'', f,  l)) !v !adj =
   let
     (adjh, adjt) = pUncons adj
     (_, _, a) = pBreak2 adjh
@@ -571,7 +570,7 @@ evalBackward (SCons _ sl) (Binary p q nn i w h j w' h' ff@(_, _, _, _, w'', h'',
     (x1, x2) = timesJacobian2 f (pAt2 p vt) (pAt2 q vt) a
     adjB = pAdd p (pAdd q adjt $ pSingleton2 w' h' x2) $ pSingleton2 w h x1
   in
-    pCons adjh $ evalBackward sl nn vt adjB
+    pCons adjh $! evalBackward sl nn vt adjB
 
 pSize :: Sing (l :: [(Nat, Nat)]) -> Int
 pSize sl =

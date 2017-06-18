@@ -21,7 +21,7 @@ import System.Remote.Monitoring
 main :: IO ()
 main =
   let
-    ir = [1, 1.1.. 1.1]
+    ir = [1, 1.1.. 1.5]
     or = fmap Prelude.sin ir
     ia = (Prelude.map (A.use . A.fromList (Z:.1:.1) . (: [])) ir) :: [Acc (Matrix (Double))]
     oa = Prelude.map (A.map fromValue . A.use . A.fromList (Z:.1:.1) . (\a -> a : [])) or ::[Acc (Matrix (ValueAndDerivative Double))]
@@ -38,7 +38,9 @@ main =
 --      store <- initAccMetrics
 --      registerGcMetrics store -- optional
 --      server <- forkServerWith store "localhost" 8001
-      writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn2 :: Gr Label Label))
+--      writeFile "file.dot" $ showDot (fglToDot $ (toFGL nn2 :: Gr Label Label))
       --print $ run $ A.zipWith (A.-) (gradient2 s1 s1 nn2 e (Prelude.map NeuralNetwork2.pFlatten i)) (gradient s1 s1 nn2 e (Prelude.map NeuralNetwork2.pFlatten i))
-      mapM_ (print . (Debug.Trace.trace "run") . run) $ forward' s1 s1 nn2 (use p) (Prelude.map pFlatten i)
+      --mapM_ (print . (Debug.Trace.trace "run") . run) $ forward' s1 s1 nn2 (use p) (Prelude.map pFlatten i)
+      case nn2 of
+        SomeNeuralNetwork p1 p2 sl sw si ss so nn -> print $ show $ pFlatten $ evalBackward sl nn (NeuralNetwork2.init 0 sl) (NeuralNetwork2.init 0 sl)
       --print $ show $ forward s1 s1 nn2 e (NeuralNetwork2.initParams 0.5 nn2) (Prelude.map NeuralNetwork2.flatten i)
